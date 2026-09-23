@@ -367,7 +367,7 @@ def _image_in_book_folder(book_dir, rel):
 class MarkdownInput(TXTInput):
     name = 'Markdown Input'
     author = 'Qbeenslee'
-    version = (3, 20, 5)
+    version = (3, 20, 6)
     description = _('Convert Markdown files to HTML, with library images.')
     file_types = {'md', 'markdown'}
     commit_name = 'markdown_input'

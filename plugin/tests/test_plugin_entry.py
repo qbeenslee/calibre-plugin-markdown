@@ -84,10 +84,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.5'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 5)
-    assert MarkdownOutput.version == (3, 20, 5)
-    assert MarkdownInput.version == (3, 20, 5)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.6'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 6)
+    assert MarkdownOutput.version == (3, 20, 6)
+    assert MarkdownInput.version == (3, 20, 6)
 
 
 def test_plugin_names():
