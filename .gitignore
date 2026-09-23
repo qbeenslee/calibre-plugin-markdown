@@ -1,0 +1,8 @@
+*.zip
+.pytest_cache/*
+.superpowers/
+.venv/
+reports/*
+docs/reports/*
+!docs/reports/*.md
+scripts/*
