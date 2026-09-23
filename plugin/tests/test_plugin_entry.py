@@ -32,6 +32,12 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
+    # 3.20.5: a Markdown file that uses the same image many times now ships
+    # it once. TXT Input embeds one file per <img> element and gives every
+    # copy a fresh name ('x.png', 'x-1.png', ...) because the copy it wrote
+    # before is already there, so 110 references to one 110 KB picture
+    # produced a 13 MB EPUB with 110 copies of it; identical bytes are now
+    # written once and every reference points at that one file.
     # 3.20.4: a book whose CSS declares a margin calibre cannot read (the
     # `margin: -2em 0 olid #20F2f0` shorthand typo expands to
     # `margin-bottom: olid`, and `1em 1em 1em 1emem` to `1emem`) no longer
@@ -78,10 +84,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.4'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 4)
-    assert MarkdownOutput.version == (3, 20, 4)
-    assert MarkdownInput.version == (3, 20, 4)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.5'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 5)
+    assert MarkdownOutput.version == (3, 20, 5)
+    assert MarkdownInput.version == (3, 20, 5)
 
 
 def test_plugin_names():

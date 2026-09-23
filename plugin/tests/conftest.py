@@ -15,6 +15,7 @@ inside `MarkdownOutput.convert()` pull in `output/convert_flow` (default_log),
 
 import builtins
 import importlib.util
+import os
 import pathlib
 import sys
 import types
@@ -177,17 +178,36 @@ class _InputFormatPlugin(_Plugin):
 
 
 class _TXTInput(_InputFormatPlugin):
-    """Matches TXT Input's markdown contract: fix_resources(html, base_dir)."""
+    """Matches TXT Input's markdown contract: fix_resources(html, base_dir).
+
+    shift_file is the builtin one as well (a name that is taken gains a
+    -1/-2 suffix, because the file lands next to the input, so the same
+    name is a collision and not a rewrite) - that numbering is what turns
+    a repeated image into one copy per reference.
+    """
 
     name = 'Stub TXT Input'
     file_types = {'txt', 'md'}
     ui_data = {'paragraph_types': {
         'auto': 'auto', 'block': 'block', 'single': 'single',
         'print': 'print', 'unformatted': 'unformatted', 'off': 'off'}}
+    output_dir = ''
 
     def fix_resources(self, html, base_dir):
         self.fix_resources_seen = (html, base_dir)
         return html
+
+    def shift_file(self, fname, data):
+        name, ext = os.path.splitext(fname)
+        candidate = os.path.join(self.output_dir, fname)
+        c = 0
+        while os.path.exists(candidate):
+            c += 1
+            candidate = os.path.join(self.output_dir, '%s-%d%s' % (
+                name, c, ext))
+        with open(candidate, 'wb') as f:
+            f.write(data)
+        return candidate
 
 
 class _TxtNewlines:

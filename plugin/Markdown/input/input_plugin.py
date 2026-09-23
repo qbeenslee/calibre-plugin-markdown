@@ -46,6 +46,7 @@ block as well, whose lines become the paragraphs of the quote.
 """
 
 import codecs
+import hashlib
 import os
 import re
 import shutil
@@ -335,6 +336,18 @@ def _readable_file(path):
     return os.path.isfile(path) and os.access(path, os.R_OK)
 
 
+def _content_digest(data):
+    """Return a digest of the bytes about to be written, or '' if not bytes.
+
+    '' means there is nothing to compare (the caller writes the file as it
+    always did); anything else is the key half of the shifted-file cache in
+    MarkdownInput.shift_file.
+    """
+    if not isinstance(data, (bytes, bytearray)):
+        return ''
+    return hashlib.sha256(bytes(data)).hexdigest()
+
+
 def _image_in_book_folder(book_dir, rel):
     """Return the image inside the book folder, or None.
 
@@ -354,7 +367,7 @@ def _image_in_book_folder(book_dir, rel):
 class MarkdownInput(TXTInput):
     name = 'Markdown Input'
     author = 'Qbeenslee'
-    version = (3, 20, 4)
+    version = (3, 20, 5)
     description = _('Convert Markdown files to HTML, with library images.')
     file_types = {'md', 'markdown'}
     commit_name = 'markdown_input'
@@ -427,6 +440,7 @@ class MarkdownInput(TXTInput):
             getattr(options, 'keep_image_sizes', True))
         self._book_dir = resolve_book_dir_for_options(options, log)
         self._yaml_language = ''
+        self._shifted_by_content = {}
         stream = self._prepare_stream(stream, options, log)
         oeb = super().convert(stream, options, file_ext, log, accelerators)
         self._apply_yaml_language(oeb)
@@ -591,6 +605,10 @@ class MarkdownInput(TXTInput):
         handling embeds them like any other local file. A local reference
         spelled with URL escapes is rewritten to the decoded path on the
         way, so the builtin finds the file it names.
+
+        The builtin handling embeds one file per <img> element; images with
+        identical bytes share a single file through shift_file below, so a
+        book that uses the same image many times ships it once.
         """
         if not self._wants_images():
             html = strip_image_tags(html)
@@ -606,6 +624,39 @@ class MarkdownInput(TXTInput):
             html = strip_image_sizes(html)
             self._log_debug('image sizes dropped (keep_image_sizes is off)')
         return super().fix_resources(html, base_dir)
+
+    def shift_file(self, fname, data):
+        """Write the file the builtin handling asks for, once per content.
+
+        TXT Input calls this once per <img> element and its own version
+        hands every call a fresh name ('x.png', 'x-1.png', ...) because the
+        copy it wrote before is already there - so a Markdown file using one
+        image 110 times ships 110 copies of it. Identical bytes are written
+        once instead: the cache key is the extension (it decides the media
+        type) plus a digest of the data, so every spelling of one image, and
+        two file names carrying the same bytes, end up as a single file that
+        all the references point at.
+        """
+        digest = _content_digest(data)
+        if not digest:
+            return super().shift_file(fname, data)
+        cache = self._shifted_file_cache()
+        key = (os.path.splitext(fname)[1].lower(), digest)
+        cached = cache.get(key)
+        if cached is not None and os.path.exists(cached):
+            self._log_debug('reusing %s for %s' % (os.path.basename(cached),
+                                                   fname))
+            return cached
+        path = super().shift_file(fname, data)
+        cache[key] = path
+        return path
+
+    def _shifted_file_cache(self):
+        """The files this conversion wrote, keyed by (extension, digest)."""
+        cache = getattr(self, '_shifted_by_content', None)
+        if cache is None:
+            cache = self._shifted_by_content = {}
+        return cache
 
     def _wants_images(self):
         return getattr(self, '_keep_images', True)
