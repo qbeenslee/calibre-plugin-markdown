@@ -21,6 +21,10 @@ calibre 自带的 TXT 输出只能写出 Markdown 的骨架：图片要自己收
 
 ### 输出：电子书 → Markdown
 
+<img src="https://github.com/qbeenslee/calibre-plugin-markdown/blob/master/docs/assets/markdown-output-conversion-zh-CN.png?raw=true" width="800px" height="auto">
+
+<img src="https://github.com/qbeenslee/calibre-plugin-markdown/blob/master/docs/assets/markdown-output-diy-plugin-zh-CN.png?raw=true" width="500px" height="auto">
+
 **Markdown 文本**
 
 - 文首目录（`inline_toc`）与标题锚点 `{#slug}`（`heading_anchors`）默认打开，目录里的链接可直接跳转。
@@ -46,6 +50,11 @@ calibre 自带的 TXT 输出只能写出 Markdown 的骨架：图片要自己收
 - 只写出 Markdown 真正引用到的图片，未被引用的图片不会落盘，也不会凭空建目录。
 
 ### 输入：Markdown → 电子书
+
+<img src="https://github.com/qbeenslee/calibre-plugin-markdown/blob/master/docs/assets/markdown-input-conversion-zh-CN.png?raw=true" width="800px" height="auto">
+
+<img src="https://github.com/qbeenslee/calibre-plugin-markdown/blob/master/docs/assets/markdown-input-diy-plugin-zh-CN.png?raw=true" width="600px" height="auto">
+
 
 - **书库图片回填**：GUI 与批量转换会把书复制到临时目录再转换，`.md` 旁边的插图因而失联。插件用注入的元数据 opf 取 calibre uuid，只读反查书库中的书籍目录，把图片复制到输入目录，交回内置资源处理嵌入；`images/`、`assets/`、`media/` 等任意同级目录都算数。
 - **URL 转义文件名**：`assets/%E3%80%90.jpg` 这类写法会先解码再查找，并把引用重写为解码后的路径；找不到的引用写入转换报告告警，不会静默丢失。
