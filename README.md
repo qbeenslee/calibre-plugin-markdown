@@ -2,7 +2,7 @@
 
 让 Markdown 成为 calibre 的一等公民：**电子书 → Markdown**（输出格式 `md`），以及 **Markdown → 电子书**（输入格式 `md` / `markdown`，自动回填书库图片）。
 
-- 当前版本：`3.20.4`（以 `plugin/Markdown/__init__.py` 的 `PLUGIN_VERSION` 为准）
+- 当前版本：`3.20.7`（以 `plugin/Markdown/__init__.py` 的 `PLUGIN_VERSION` 为准）
 - 依赖：calibre ≥ 6.0.0（macOS / Windows / Linux）
 - 许可：GPLv3
 
@@ -30,6 +30,7 @@ calibre 自带的 TXT 输出只能写出 Markdown 的骨架：图片要自己收
 - 文首目录（`inline_toc`）与标题锚点 `{#slug}`（`heading_anchors`）默认打开，目录里的链接可直接跳转。
 - 段落风格（`paragraph_style`）：`block`（标准 Markdown，空行分段）或 `single`（每行一段，不写空行，适合网文/逐行素材）；`single` 下可选择标题前补空行（`blank_line_before_heading`）。
 - 代码围栏与语言标注、表格、定义列表、引用块等结构保持原样，不因段落重排被拆散。
+- 列表项的文字接在 `- ` 后面（书里用 `<p>` 包住条目文字也一样），条目里的第二个段落、引用或嵌套列表各占一行、缩进在条目下。
 - 转义 Markdown 特殊字符（`escape_markdown_chars`）默认关闭：`第1卷 原版(By:苏梦枕)` 这类书名按原样写出；表格与 YAML 内部照常转义。
 - 可选清除 PDF 页码行（`strip_pdf_page_markers`，如 `Page-12`）。
 - 行宽（`max_line_length` / `force_max_line_length`，默认 0 即不折行）、换行符（`newline`，默认 unix）、输出编码（`txt_output_encoding`，默认 utf-8）。

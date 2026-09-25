@@ -32,6 +32,17 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
+    # 3.20.7: the text of a list item stays on its own "- " line. Books wrap
+    # the item's text in a <p> (the "loose list" shape) and upstream writes
+    # that paragraph as a block of its own, so the item came out as a bullet
+    # with nothing after it and the text on the next line, outside the item -
+    # with the whitespace the book indents its markup with folded into a
+    # space in front of it ("-  " and still the text below). The <p> around
+    # the text is dropped now (a Markdown item *is* a paragraph), a further
+    # block of the item - a second paragraph, a nested list, a quote - is
+    # written on lines of its own (a further paragraph indented under the
+    # item), and the formatting whitespace around the item's elements is no
+    # longer written into the output.
     # 3.20.5: a Markdown file that uses the same image many times now ships
     # it once. TXT Input embeds one file per <img> element and gives every
     # copy a fresh name ('x.png', 'x-1.png', ...) because the copy it wrote
@@ -84,10 +95,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.6'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 6)
-    assert MarkdownOutput.version == (3, 20, 6)
-    assert MarkdownInput.version == (3, 20, 6)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.7'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 7)
+    assert MarkdownOutput.version == (3, 20, 7)
+    assert MarkdownInput.version == (3, 20, 7)
 
 
 def test_plugin_names():

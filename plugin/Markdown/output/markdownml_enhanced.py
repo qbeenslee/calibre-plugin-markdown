@@ -50,6 +50,31 @@ BLOCK_LEVEL_TAGS = frozenset((
     'hr', 'li', 'ol', 'p', 'pre', 'table', 'ul',
 ))
 
+#: Blocks that can stand on a list item's own "- " line: the bullet already
+#: opened the line, so these are written where the item stands instead of
+#: opening a line of their own. Blocks that need lines of their own - a nested
+#: list, a table, a fenced code block, a definition list - end the item's line
+#: instead, as they always did (see _dump_item_block).
+ITEM_LINE_BLOCKS = frozenset((
+    'blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p',
+))
+
+#: The content of a list item is being rendered, and its own line is still
+#: empty: the first block of the item continues the bullet's line (see
+#: _dump_item_block).
+ITEM_LINE_OPEN = 'open'
+
+#: The content of a list item is being rendered and its own line is taken (by
+#: the item's text, by inline content or by a block that opened a line of its
+#: own): a block after it is a paragraph of the item of its own.
+ITEM_LINE_STARTED = 'started'
+
+#: The wrappers a list item's text comes in: a <p> (or <div>) around the text
+#: is the item's own paragraph - a Markdown item *is* a paragraph - so the
+#: wrapper is dropped and its content written where the item stands (see
+#: _dump_item_paragraph).
+ITEM_TEXT_WRAPPERS = frozenset(('div', 'p'))
+
 #: Tags that keep their own Markdown syntax inside a heading. Everything else
 #: a heading holds is flattened to plain text: a Markdown heading is one line,
 #: and its "#" markers already say it is a heading - so no "**" for the bold
@@ -63,6 +88,27 @@ HEADING_INLINE_TAGS = frozenset((
 def _ends_with_blank_line(text):
     """True when the collected text already ends with a blank line."""
     return ''.join(text[-2:]).endswith('\n\n')
+
+
+def _has_visible_text(fragments):
+    """True when rendered fragments hold something other than whitespace."""
+    return any(isinstance(part, str) and part.strip() for part in fragments)
+
+
+def _drop_leading_blank_fragments(fragments):
+    """Drop the blank fragments a block leaves before its own first line.
+
+    A book indents the markup of a block (`<ul>` and its first `<li>` are on
+    lines of their own), and the fold turns that whitespace into a space which
+    is written before the block's own newline - a trailing space on the line
+    above it, once the block is written on a line of its own.
+    """
+    for index, part in enumerate(fragments):
+        if not isinstance(part, str):
+            return fragments[index:]
+        if part.strip() or '\n' in part:
+            return fragments[index:]
+    return []
 
 
 def _css_margin_break(style, side):
@@ -147,6 +193,13 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
     #: the class attribute covers a renderer that was built by hand.
     _in_heading = False
 
+    #: Set while the content of a list item is being written: ITEM_LINE_OPEN
+    #: while the item's own line is still empty (the first block of the item
+    #: continues it, see _dump_item_block), ITEM_LINE_STARTED once it is taken,
+    #: None anywhere else. Reset per book in extract_content(); the class
+    #: attribute covers a renderer that was built by hand.
+    _item_line = None
+
     def extract_content(self, oeb_book, opts):
         self.log.info('Converting XHTML to enhanced Markdown formatted TXT...')
         self.opts = opts
@@ -159,6 +212,7 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
         self._in_table_cell = False
         self._in_figure = False
         self._in_heading = False
+        self._item_line = None
         self._fenced_pre = False
         self.style_strike = False
         self.toc_entries = []
@@ -545,22 +599,33 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
         text = re.sub(r'^\[\^[^\]]+\]:?\s*', '', text)
         return text
 
-    def _capture_footnote_definition(self, elem, stylizer):
-        element_id = (elem.attrib.get('id') or '').strip()
+    def _is_footnote_definition(self, elem):
+        '''True when this element is a footnote definition (not its content).
+
+        Split out of _capture_footnote_definition so the list item renderer
+        can tell a footnote <p>/<div> from the wrapper around the item's text
+        before it decides to write it on the item's own line.
+        '''
+        attrib = getattr(elem, 'attrib', None) or {}
+        element_id = (attrib.get('id') or '').strip()
         if not element_id:
             return False
-        cls = elem.attrib.get('class', '')
-        role = elem.attrib.get('role', '')
-        epub_type = elem.attrib.get('epub:type', '') + ' ' + elem.attrib.get('{http://www.idpf.org/2007/ops}type', '')
-        is_definition = (
+        cls = attrib.get('class', '')
+        role = attrib.get('role', '')
+        epub_type = attrib.get('epub:type', '') + ' ' + attrib.get(
+            '{http://www.idpf.org/2007/ops}type', '')
+        return (
             element_id in self._footnote_refs
             or self._looks_like_footnote_id(element_id)
             or self._contains_token(cls, 'footnote')
             or role == 'doc-footnote'
             or self._contains_token(epub_type, 'footnote')
         )
-        if not is_definition:
+
+    def _capture_footnote_definition(self, elem, stylizer):
+        if not self._is_footnote_definition(elem):
             return False
+        element_id = (elem.attrib.get('id') or '').strip()
 
         label = self._footnote_label_for_target(element_id)
         definition = self._collect_footnote_definition(elem, stylizer)
@@ -1005,6 +1070,16 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
         return '', text, None
 
     def _dump_list_item(self, elem, stylizer):
+        '''Render one <li> as "- item" (or "1. item") plus its blocks.
+
+        The bullet opens the item's line, and everything the item holds that
+        can stand on a line is written on it - which for the usual EPUB shape
+        `<li><p>text</p></li>` means the <p> is transparent instead of opening
+        a line of its own right after the bullet (see _dump_item_block). The
+        whitespace an indented book puts around the item's elements is
+        formatting, so it is not written into the output: it used to end up as
+        a trailing space on the item's line.
+        '''
         text = []
         style = stylizer.style(elem)
         tags = []
@@ -1032,7 +1107,134 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
         elif li['name'] == 'ol':
             li['num'] += 1
             text.append(str(li['num']) + '. ')
+        content_start = len(text)
 
+        self._open_emphasis(style, tag, text, tags)
+
+        task_marker, first_text, skip_item_idx = self._extract_task_checkbox(elem)
+        if task_marker:
+            text.append(task_marker)
+
+        previous = self._item_line
+        self._item_line = ITEM_LINE_OPEN
+        try:
+            if first_text:
+                # The newline a book leaves between <li> and its first element
+                # is formatting; folding it into a space put a second space
+                # after the bullet ("-  text").
+                rendered = self._format_fragment(first_text).lstrip()
+                if rendered:
+                    text.append(rendered)
+                    self._item_line = ITEM_LINE_STARTED
+
+            for idx, item in enumerate(elem):
+                if skip_item_idx is not None and idx == skip_item_idx:
+                    tail = self._tail_fragment(item)
+                    if tail:
+                        text.append(tail)
+                    continue
+                fragments = self.dump_text(item, stylizer)
+                if self._item_line == ITEM_LINE_OPEN \
+                        and _has_visible_text(fragments):
+                    # Inline content (a <span>, an image, ...) opened the item's
+                    # line; a block after it is a further paragraph of the item.
+                    self._item_line = ITEM_LINE_STARTED
+                item_tag = getattr(item, 'tag', None)
+                if isinstance(item_tag, (str, bytes)) \
+                        and barename(item_tag) in BLOCK_LEVEL_TAGS:
+                    fragments = _drop_leading_blank_fragments(fragments)
+                text += fragments
+        finally:
+            self._item_line = previous
+
+        # The whitespace an indented book leaves between the item's elements is
+        # written as a space by the tail handling; the item's line ends on its
+        # last piece of text, as in the quote renderer. Line breaks stay - they
+        # are what puts a block of the item on a line of its own.
+        while len(text) > content_start and not text[-1].strip() \
+                and '\n' not in text[-1]:
+            text.pop()
+
+        self._close_emphasis(tags, text)
+
+        tail = self._tail_fragment(elem)
+        if tail and tail.strip():
+            text.append(tail)
+
+        return text
+
+    def _dump_item_block(self, elem, stylizer, tag, style):
+        '''Write a block of a list item that stands on the item's own line.
+
+        Upstream opens every block with a newline of its own, which on the
+        item's line put the text under the bullet instead of next to it:
+        `<li><p>text</p></li>` came out as "- " and then the text on a line of
+        its own, a list item with no content. Since the "- " bullet already
+        opened the line, the opening newline is not written here.
+
+        A <p> (or <div>) around the item's text is dropped altogether - what a
+        Markdown item needs is the paragraph's content, the wrapper is the
+        markup's way of saying "this item is a paragraph" (see
+        _dump_item_paragraph).
+        '''
+        first = self._item_line == ITEM_LINE_OPEN
+        self._item_line = ITEM_LINE_STARTED
+        if tag in ITEM_TEXT_WRAPPERS and not self._is_footnote_definition(elem):
+            return self._dump_item_paragraph(elem, stylizer, style, first)
+        # The block's content is its own, not the item's: a <p> inside a quote
+        # is the quote's paragraph (the quote writes the prefix for it), not
+        # another paragraph of the item.
+        previous = self._item_line
+        self._item_line = None
+        try:
+            parts = self.dump_text(elem, stylizer)
+        finally:
+            self._item_line = previous
+        if parts and isinstance(parts[0], str) and parts[0].startswith('\n'):
+            parts[0] = parts[0][1:]
+        return parts
+
+    def _dump_item_paragraph(self, elem, stylizer, style, first):
+        '''Write the content of the <p>/<div> a list item's text is wrapped in.
+
+        The first wrapper of an item continues the "- " line. A wrapper that
+        follows content of the item is a paragraph of its own, separated by the
+        blank line that separates paragraphs and indented to the item's content
+        column so it stays inside the item instead of ending the list.
+        '''
+        previous = self._item_line
+        self._item_line = None
+        try:
+            body = ''.join(self._dump_inline_block(elem, stylizer)).strip()
+        finally:
+            self._item_line = previous
+        if not body:
+            return []
+        text = []
+        tags = []
+        if not first:
+            text.append('\n\n' + self._item_indent())
+        self._open_emphasis(style, barename(elem.tag), text, tags)
+        text.append(body)
+        self._close_emphasis(tags, text)
+        return text
+
+    def _item_indent(self):
+        '''The indent that keeps a further paragraph inside its list item.
+
+        One level of the tab the nested lists are indented with, which is at
+        least the two columns a "- " item's content has to start at to stay
+        inside the item.
+        '''
+        return '\t' * len(self.list)
+
+    def _open_emphasis(self, style, tag, text, tags):
+        '''Write the emphasis this element starts, and record how to close it.
+
+        Both a list item and the <p> around its text carry the styling of the
+        item, so both open the item's emphasis: an already open state is not
+        opened a second time (the delimiters would nest and break the run).
+        '''
         if style['font-style'] == 'italic' or tag in ('i', 'em'):
             if self.style_italic is False:
                 text.append('*')
@@ -1044,22 +1246,8 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
                 tags.append('**')
                 self.style_bold = True
 
-        task_marker, first_text, skip_item_idx = self._extract_task_checkbox(elem)
-        if task_marker:
-            text.append(task_marker)
-
-        if first_text:
-            txt = self._format_fragment(first_text)
-            text.append(txt)
-
-        for idx, item in enumerate(elem):
-            if skip_item_idx is not None and idx == skip_item_idx:
-                tail = self._tail_fragment(item)
-                if tail:
-                    text.append(tail)
-                continue
-            text += self.dump_text(item, stylizer)
-
+    def _close_emphasis(self, tags, text):
+        '''Close the emphasis _open_emphasis() recorded, innermost first.'''
         tags.reverse()
         for t in tags:
             if t == '**':
@@ -1067,12 +1255,6 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
             elif t == '*':
                 self.style_italic = False
             text.append(t)
-
-        tail = self._tail_fragment(elem)
-        if tail:
-            text.append(tail)
-
-        return text
 
     def _dump_inline_block(self, elem, stylizer):
         text = []
@@ -1180,6 +1362,14 @@ class EnhancedMarkdownMLizer(MarkdownMLizer):
 
         if self._in_heading and tag not in HEADING_INLINE_TAGS:
             return self._dump_heading_inline(elem, stylizer)
+
+        if self._item_line and tag in BLOCK_LEVEL_TAGS:
+            if tag in ITEM_LINE_BLOCKS:
+                return self._dump_item_block(elem, stylizer, tag, style)
+            # A block that needs lines of its own - a nested list, a table, a
+            # fenced code block - ends the item's line instead of continuing
+            # it; what follows it is no longer the item's first content.
+            self._item_line = ITEM_LINE_STARTED
 
         if tag == 'img':
             sized = self._html_image(elem, style)

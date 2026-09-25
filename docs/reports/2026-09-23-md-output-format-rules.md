@@ -1,7 +1,7 @@
-# Markdown 输出插件：输出 .md 的格式规范与修正清单（v3.20.6）
+# Markdown 输出插件：输出 .md 的格式规范与修正清单（v3.20.7）
 
-日期：2026-09-23
-插件版本：3.20.6
+日期：2026-09-23（v3.20.7 于 2026-09-26 更新列表一节）
+插件版本：3.20.7
 范围：`plugin/Markdown/output/`（输出插件、转换面板、自定义弹窗、MarkdownML 渲染器）及其依赖的 `utils/helpers.py`、`utils/remote_images.py`、`utils/library.py`
 
 本报告回答一个问题：**一本书经过本插件转成 Markdown 后，产出的 .md 为什么长这样**——
@@ -135,10 +135,16 @@ slug 由 `slugify()` 生成且全文唯一（重复加 `-2`、`-3`…），与�
 | XHTML | 输出 | 说明 |
 |---|---|---|
 | `ul > li` | `- 项` | **上游写 `+ `**，本插件改用 `- `（CommonMark 主流记号） |
+| `li > p`（loose list） | `- 项` | **修正上游**：上游把包裹段落的文字包在条目下一行（`- ` + 换行 + 文字，条目成为空项）；`<p>`/`<div>` 包裹是透明的，文字直接接在 `- ` 后面 |
+| 条目里的第二个 `<p>` | 空行 + `\t × 深度` + 文字 | 空行分段，缩进到条目的内容列，仍属于该条目 |
 | `ol > li` | `1. ` `2. `… | 每个 `ol` 独立计数，靠 `self.list` 栈维护 |
-| 嵌套列表 | 行首 `\t × (深度-1)` | 只缩进嵌套层 |
+| 嵌套列表 | 行首 `\t × (深度-1)` | 只缩进嵌套层；`li` 只有嵌套列表（无文字）时输出 `- ` 行 + 缩进的子列表 |
+| 条目里的引用/标题 | `- > 引文` / `- ### 标题` | 首块接在子弹行（上游会先换行，把文字顶到下一行） |
 | 任务项 | `[x] ` / `[ ] ` | 识别文本里的 `[ ]`/`[x]` 前缀，或 `<input type=checkbox>`（`checked`/`aria-checked=true|mixed`/`value=true`） |
-| 斜体/粗体 | `*项*` / `**项**` | 由 CSS 或 `i/em/b/strong` 触发，且不在已处于该状态时重复嵌套 |
+| 斜体/粗体 | `*项*` / `**项**` | 由 CSS 或 `i/em/b/strong` 触发，且不在已处于该状态时重复嵌套（条目与包裹它的 `<p>` 共用一个强调状态） |
+
+条目前后的缩进空白（`<li>` 与 `<p>` 之间的换行）是版式而非内容：不写进行首（否则 `- 项` 变成 `-  项`），也不写进行尾。
+条目里首块之后的空白同理，不留在上一行行尾。
 
 ### 3.6 引用块
 
@@ -307,6 +313,7 @@ slug 由 `slugify()` 生成且全文唯一（重复加 `-2`、`-3`…），与�
 | 11 | 无 TOC / YAML / 封面控制 | `inline_toc`、`yaml_front_matter`、`export_cover_page`（§2） |
 | 12 | 定义列表 / `mark` / `figure` 无对应处理 | 见 §3.10、§4 |
 | 13 | 标题的子元素按块级渲染：嵌套标题再写一遍 `#`（`## ### 第1章`）、`<br>` 写硬换行把标题截断、子元素继承的 bold 又写出 `**` | 标题内容走行内模式，一个标题一行、一个层级标记（§3.4） |
+| 14 | 列表项的文字被 `<p>` 包住时，上游把该 `<p>` 当独立块：`<li><p>文字</p></li>` 输出 `- ` + 换行 + 文字（条目空、文字掉出列表），书里的缩进空白还被折成空格（`-  `） | 条目里的 `<p>`/`<div>` 包裹透明化，首块接子弹行、后续块按条目内容列缩进；缩进空白不写进输出（§3.5） |
 
 ## 9. 容错：坏 CSS 不再中断导出
 
@@ -344,16 +351,17 @@ def repair_margin_lengths(style):
 
 ## 11. 验证
 
-- 单元测试：`.venv/bin/python -m pytest plugin/tests -q` → **466 passed**（2026-09-23 基线）。
+- 单元测试：`.venv/bin/python -m pytest plugin/tests -q` → **484 passed**（2026-09-26 基线）。
   覆盖本报告各条的测试：`test_blockquote.py`、`test_heading_anchors.py`、`test_heading_inline.py`、`test_escape_chars.py`、
   `test_paragraph_style.py`、`test_keep_image_sizes.py`、`test_image_size.py`、`test_image_formats.py`、
   `test_image_export.py`、`test_remote_images.py`、`test_broken_css_margins.py`、`test_cover_page.py`、
-  `test_library_metadata.py`、`test_output_options.py`、`test_helpers_baseline.py`。
+  `test_library_metadata.py`、`test_output_options.py`、`test_helpers_baseline.py`、`test_list_items.py`。
 - 真机验收（calibre-debug，改源码树即可跑）：`scripts/verify_blockquote.py`、
   `scripts/verify_quote_paragraphs.py`、`scripts/verify_escape_chars.py`、
   `scripts/verify_keep_image_sizes.py`、`scripts/verify_webp_export.py`、
   `scripts/verify_no_broken_css_margin.py`、`scripts/verify_heading_141.py`、`scripts/verify_md_library_images.py`、
-  `scripts/verify_yaml_front_matter_pane.py`、`scripts/verify_image_output_pane.py`。
+  `scripts/verify_yaml_front_matter_pane.py`、`scripts/verify_image_output_pane.py`、
+  `scripts/verify_list_items.py`（列表项；`-- --scan=N` 可再扫一批书看列表形状）。
 - 用户在 GUI 实际生效仍需 `./install.sh` 装成 `~/Library/Preferences/calibre/plugins/Markdown.zip` 并重启 calibre。
 
 ## 12. 文件清单
