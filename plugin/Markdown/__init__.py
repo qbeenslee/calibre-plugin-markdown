@@ -23,11 +23,11 @@ from calibre_plugins.markdown.output.output_plugin import MarkdownOutput  # noqa
 
 PLUGIN_NAME = 'Markdown Output'
 PLUGIN_DESCRIPTION = 'Convert books to Markdown text files.'
-PLUGIN_VERSION_TUPLE = (3, 20, 7)
-PLUGIN_VERSION = '3.20.7'
+PLUGIN_VERSION_TUPLE = (3, 20, 8)
+PLUGIN_VERSION = '3.20.8'
 PLUGIN_MINIMUM_CALIBRE_VERSION = (6, 0, 0)
-PLUGIN_RELEASED = '23 Sep, 2026'
-PLUGIN_ABOUT_LAST_UPDATED = '2026-09-23'
+PLUGIN_RELEASED = '26 Sep, 2026'
+PLUGIN_ABOUT_LAST_UPDATED = '2026-09-26'
 PLUGIN_RELEASE_URL = 'https://github.com/qbeenslee/calibre-plugin-markdown'
 PLUGIN_LEGACY_ORIGIN_URL = 'https://github.com/qbeenslee/calibre-plugin-markdown'
 PLUGIN_AUTHOR = 'Qbeenslee'

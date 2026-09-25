@@ -22,6 +22,7 @@ import types
 
 import pytest
 
+from calibre.ebooks.txt.markdownml import MarkdownMLizer
 from calibre_plugins.markdown.output.markdownml_enhanced import (
     EnhancedMarkdownMLizer,
 )
@@ -31,8 +32,11 @@ XHTML_NS = 'http://www.w3.org/1999/xhtml'
 
 #: The real base class is calibre's MarkdownMLizer; under the test stubs it is
 #: whatever conftest put there, and the parts the renderer delegates to are
-#: filled in by the fixtures below (the stub has none of them).
-STUB_BASE = EnhancedMarkdownMLizer.__mro__[1]
+#: filled in by the fixtures below (the stub has none of them). It is named
+#: explicitly - and not taken from the renderer's MRO, which now holds the
+#: renderer mixins - so the patches always land on the class the renderer
+#: delegates to.
+STUB_BASE = MarkdownMLizer
 
 
 class Log:

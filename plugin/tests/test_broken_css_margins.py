@@ -85,7 +85,7 @@ def _elem(**attribs):
 # ------------------------------------------------------------- the repair
 
 def test_unreadable_margin_is_reset_to_zero():
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     style = FakeStyle({'margin-bottom': 'olid'})
@@ -95,7 +95,7 @@ def test_unreadable_margin_is_reset_to_zero():
 
 
 def test_readable_lengths_and_keywords_are_left_alone():
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     for value in ('2em', '1.5em', '-2em', '50%', '0', '0%', '15px', '1pt',
@@ -107,7 +107,7 @@ def test_readable_lengths_and_keywords_are_left_alone():
 
 def test_unreadable_unit_suffix_is_reset():
     # 老人修仙记 declares `margin: 1em 1em 1em 1emem`.
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     style = FakeStyle({'margin-bottom': '1emem'})
@@ -118,7 +118,7 @@ def test_unreadable_unit_suffix_is_reset():
 
 def test_empty_value_is_reset():
     # float('') fails the same way float('olid') does.
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     style = FakeStyle({'margin-top': ''})
@@ -128,7 +128,7 @@ def test_empty_value_is_reset():
 
 
 def test_missing_margins_are_not_invented():
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     style = FakeStyle({'text-indent': '2em'})
@@ -140,7 +140,7 @@ def test_missing_margins_are_not_invented():
 def test_other_sides_are_left_alone():
     # Only the top/bottom margins are float()ed by the renderer; the left/right
     # ones must not be rewritten behind the book's back.
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     style = FakeStyle({'margin-left': '#20F2f0', 'margin-right': 'olid'})
@@ -150,7 +150,7 @@ def test_other_sides_are_left_alone():
 
 
 def test_repair_is_idempotent():
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
     style = FakeStyle({'margin-bottom': 'olid'})
@@ -160,7 +160,7 @@ def test_repair_is_idempotent():
 
 
 def test_style_without_the_calibre_accessors_is_skipped():
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         repair_margin_lengths,
     )
 
@@ -190,7 +190,7 @@ def test_dump_text_keeps_a_readable_margin():
 
 
 def test_summary_line_names_the_values_once():
-    from calibre_plugins.markdown.output.markdownml_enhanced import (
+    from calibre_plugins.markdown.output.renderers.primitives import (
         margin_repair_summary,
     )
 
