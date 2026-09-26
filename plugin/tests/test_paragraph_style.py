@@ -3,7 +3,10 @@
 
 'block' (default) keeps the standard Markdown layout where a blank line
 separates paragraphs. 'single' drops blank lines so every content line
-stands as its own paragraph line.
+stands as its own paragraph line - except the ones that are not a paragraph
+separation: the blank lines inside a fenced code block, the one that ends a
+quote block, and the ones around the blocks Markdown reads across consecutive
+lines (a list, a table, a definition list, a footnote definition).
 """
 
 from calibre_plugins.markdown.output.convert_flow import apply_prefs_to_opts
@@ -44,7 +47,9 @@ SINGLE_TEXT = (
     'title: Book\n'
     '---\n'
     '## Table of Contents\n'
+    '\n'
     '- [One](#one)\n'
+    '\n'
     '# One {#one}\n'
     'First paragraph.\n'
     'Second paragraph.\n'
@@ -52,22 +57,29 @@ SINGLE_TEXT = (
     'keep = [\n\n'
     ']\n'
     '```\n'
+    '\n'
     '| a | b |\n'
     '|---|---|\n'
     '| 1 | 2 |\n'
+    '\n'
     '> quoted\n'
 )
 
 
 def test_single_style_drops_blank_lines():
-    # The only blank lines left are inside the fenced code block.
+    # What is left of the blank lines: the code block's own, and the ones that
+    # keep the structures (the TOC list, the table) apart from the text around
+    # them - the blank line after the table included, a quote line below it
+    # being read as a row of the table otherwise.
     assert apply_paragraph_style(BLOCK_TEXT, 'single') == SINGLE_TEXT
 
 
 def test_single_style_keeps_code_block_content():
     out = apply_paragraph_style(BLOCK_TEXT, 'single')
     assert 'keep = [\n\n]\n' in out
-    assert '```\n| a | b |\n' in out
+    # The blank line after the fence is not a paragraph separation: the table
+    # after it has to start a block of its own.
+    assert '```\n\n| a | b |\n' in out
 
 
 def test_single_style_keeps_table_rows():
@@ -120,6 +132,116 @@ def test_single_style_still_drops_the_blank_line_between_two_quotes():
     # Two quotes in a row are one quote block either way, and a quote line is
     # a paragraph line of its own once the file is read back as 'single'.
     assert apply_paragraph_style('> 甲\n\n> 乙\n', 'single') == '> 甲\n> 乙\n'
+
+
+# The blocks Markdown reads across consecutive lines. The blank lines around
+# them are not paragraph separations: dropping them lets the text around a
+# block be read as part of it (the paragraph after a list becomes a line of
+# the item, the one after a table a row of it), and python-markdown never
+# starts a list or a table inside a paragraph in the first place.
+
+LIST_TEXT = '第一段。\n\n- 甲\n- 乙\n\n第二段。\n'
+
+
+def test_single_style_keeps_the_blank_lines_around_a_list():
+    assert apply_paragraph_style(LIST_TEXT, 'single') == LIST_TEXT
+
+
+def test_single_style_keeps_the_blank_lines_around_an_ordered_list():
+    text = '第一段。\n\n1. 甲\n2. 乙\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_a_list_items_second_paragraph():
+    # The renderer writes it as a blank line plus the item's content indent:
+    # without the blank line the two paragraphs of the item become one.
+    text = '- 甲\n\n\t条目的第二段\n\n- 乙\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_the_blank_lines_around_a_table():
+    text = '第一段。\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_the_table_caption_apart():
+    text = '第一段。\n\n*表标题*\n\n| a | b |\n|---|---|\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_a_table_apart_from_the_heading_after_it():
+    # The blank line after the table stays (the heading would be read as a row
+    # of it); the one after the heading is a paragraph separation and goes.
+    text = '| a | b |\n|---|---|\n| 1 | 2 |\n\n# 标题\n\n正文。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '| a | b |\n|---|---|\n| 1 | 2 |\n\n# 标题\n正文。\n'
+
+
+def test_single_style_keeps_a_table_apart_from_the_next_table():
+    text = '| a | b |\n|---|---|\n\n| c | d |\n|---|---|\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_the_blank_lines_around_a_definition_list():
+    text = '第一段。\n\n术语\n: 释义\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_the_blank_line_before_footnote_definitions():
+    text = '正文[^1]。\n\n[^1]: 脚注正文\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_the_blank_line_after_a_quoted_list():
+    # The quote ends here, and that blank line is what ends it (the line above
+    # the quoted list needs none: a quote interrupts a paragraph).
+    text = '第一段。\n\n> - 甲\n> - 乙\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '第一段。\n> - 甲\n> - 乙\n\n第二段。\n'
+
+
+def test_single_style_keeps_the_blank_line_between_a_list_item_and_a_quote():
+    # A quote interrupts a paragraph, not a list item: without the blank line
+    # the quote line is read as a lazy continuation line of the item above it.
+    text = '- 甲\n\n> *引文*\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_ends_a_quote_that_carries_unprefixed_lines():
+    # A quoted <pre> is written without the ">" prefix, so its lines are lazy
+    # continuation lines of the quote: the blank line after them is what ends
+    # the quote, and without it the paragraph below is swallowed into it.
+    text = '正文。\n\n> 引文\ncode 行\n\n正文二。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '正文。\n> 引文\ncode 行\n\n正文二。\n'
+
+
+def test_single_style_still_drops_the_blank_lines_around_a_fence():
+    # A fenced code block interrupts a paragraph and needs no blank line
+    # around it either, so 'single' stays compact there.
+    text = '第一段。\n\n```\ncode\n```\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '第一段。\n```\ncode\n```\n第二段。\n'
+
+
+def test_single_style_still_drops_the_blank_lines_around_a_thematic_break():
+    text = '第一段。\n\n* * *\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '第一段。\n* * *\n第二段。\n'
+
+
+def test_single_style_still_drops_the_blank_line_before_a_quote():
+    # A quote interrupts a paragraph: the line above it needs no blank line.
+    text = '第一段。\n\n> 引用\n'
+    assert apply_paragraph_style(text, 'single') == '第一段。\n> 引用\n'
+
+
+def test_a_pipe_line_without_an_alignment_row_is_not_a_table():
+    # A table is one only with its alignment row under the first row; a line
+    # that merely carries a pipe is paragraph text and stays one.
+    text = '第一段。\n\n| 只是带竖线的正文\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '第一段。\n| 只是带竖线的正文\n第二段。\n'
 
 
 def test_single_style_on_empty_text():

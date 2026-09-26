@@ -5,6 +5,7 @@ from __future__ import print_function
 
 import os
 import re
+from collections import namedtuple
 from urllib.parse import quote
 
 TABLE_ROW_WRAPPERS = ('thead', 'tbody', 'tfoot')
@@ -142,32 +143,237 @@ PARAGRAPH_STYLE_BLOCK = 'block'
 PARAGRAPH_STYLE_SINGLE = 'single'
 _FENCE_MARKER_RE = re.compile(r'^\s*(```|~~~)')
 _HEADING_LINE_RE = re.compile(r'^#{1,6}(?:\s|$)')
-_QUOTE_LINE_RE = re.compile(r'^ {0,3}>')
+_QUOTE_PREFIX_RE = re.compile(r'^(?: {0,3}>[ \t]?)+')
+#: A line that opens a list item - the spelling the renderers write ("- 项",
+#: "1. 项", nested with tabs or two spaces) and the CommonMark one besides.
+_LIST_LINE_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)')
+#: A thematic break. The '<hr>' the renderer writes is "* * *", which only the
+#: thematic break reading makes sense of: as a list item it is not a block the
+#: blank lines around it have to be kept for (a thematic break interrupts a
+#: paragraph and needs no blank line at all).
+_THEMATIC_LINE_RE = re.compile(
+    r'^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$')
+#: A table row: the pipe tables the renderer writes always open with one.
+_TABLE_ROW_RE = re.compile(r'^[ \t]*\|')
+_TABLE_CELL_RE = re.compile(r':?-+:?')
+#: The ": 释义" line under a definition list's term.
+_DEF_ITEM_LINE_RE = re.compile(r'^[ \t]*:[ \t]')
+#: A footnote definition, "[^1]: 正文".
+_FOOTNOTE_LINE_RE = re.compile(r'^[ \t]*\[\^[^\]]+\]:')
+
+#: What one line of the finished Markdown is for the 'single' style's
+#: blank-line rules: the structure it carries (one of the kinds below) and
+#: whether it is a line inside a quote block.
+_Line = namedtuple('_Line', 'kind quoted')
+
+#: A blank line. It is kept only where it separates structure, not paragraphs.
+_BLANK = 'blank'
+#: A line of a fenced code block - its fences included. Blank lines in there
+#: are content.
+_FENCED = 'fenced'
+#: A line of a quote block other than the structures below ("quote content").
+_QUOTE = 'quote'
+#: A list item, or a line that continues one (the indented second paragraph of
+#: an item, a nested block of it).
+_LIST = 'list'
+#: A table row (the header, the alignment row, the data rows).
+_TABLE = 'table'
+#: The "*标题*" line the renderer writes above a table.
+_CAPTION = 'caption'
+#: The term line of a definition list (the line above a ": 释义" line).
+_DEF_TERM = 'def-term'
+#: The ": 释义" line of a definition list.
+_DEF_ITEM = 'def-item'
+#: A footnote definition, "[^1]: 正文".
+_FOOTNOTE = 'footnote'
+#: Everything else: paragraphs, headings, "* * *", the lines of inline HTML.
+_TEXT = 'text'
+
+#: The kinds a blank line has to stay away from: the blocks Markdown reads
+#: across consecutive lines. Dropping the blank line between one of them and
+#: the text around it does not separate two paragraphs - it lets the text be
+#: read as part of the block (a following paragraph line becomes a lazy
+#: continuation of a list item, a row of a table, the definition of the term
+#: above it) or stops the block from being recognized at all (python-markdown
+#: never starts a list or a table inside a paragraph).
+_STRUCTURE_KINDS = frozenset((
+    _LIST, _TABLE, _CAPTION, _DEF_TERM, _DEF_ITEM, _FOOTNOTE))
 
 
-def _following_content_lines(lines):
-    '''For every line, the next line that has content (None past the end).'''
+def _following_content_indexes(lines):
+    '''For every line, the index of the next line with content (None past the end).'''
     following = [None] * len(lines)
-    next_line = None
+    next_index = None
     for index in range(len(lines) - 1, -1, -1):
-        following[index] = next_line
+        following[index] = next_index
         if lines[index].strip():
-            next_line = lines[index]
+            next_index = index
     return following
 
 
-def _ends_a_quote_block(previous, following):
-    '''True for the blank line that ends a quote block.
+def _preceding_content_indexes(lines):
+    '''For every line, the index of the previous line with content (None before the start).'''
+    preceding = [None] * len(lines)
+    previous_index = None
+    for index, line in enumerate(lines):
+        preceding[index] = previous_index
+        if line.strip():
+            previous_index = index
+    return preceding
 
-    'single' style drops the blank lines between paragraphs, but the one
-    after a quote block is not a paragraph separation: a quote is read up to
-    the next blank line, so without it the line that follows is swallowed
-    into the quote as a lazy continuation line. Only a line outside a quote
-    needs the protection - at the end of the text there is nothing to keep
-    apart from the quote.
+
+def _strip_quote_prefix(line):
+    '''The content of a line without the ">" markers it carries.
+
+    The structure behind the markers is the structure of the line: a quote
+    holding a list ("- > 引文", "> - 甲") is a list at that quote level.
     '''
-    return bool(following) and bool(_QUOTE_LINE_RE.match(previous)) \
-        and not _QUOTE_LINE_RE.match(following)
+    return _QUOTE_PREFIX_RE.sub('', line, count=1)
+
+
+def _is_table_delimiter(line):
+    '''True for the "| --- | :-: |" alignment row under a table header.
+
+    A table is only a table when that row follows its first row, which is how
+    the line above it is told from a paragraph that happens to carry a pipe.
+    '''
+    text = _strip_quote_prefix(line).strip()
+    if '|' not in text or '-' not in text:
+        return False
+    cells = [cell.strip() for cell in text.strip('|').split('|')]
+    return bool(cells) and all(_TABLE_CELL_RE.fullmatch(cell) for cell in cells)
+
+
+def _starts_a_table(lines, following, index):
+    '''True when the line at index opens a table (its own next line aligns it).'''
+    if index is None:
+        return False
+    after = following[index]
+    return after is not None and _is_table_delimiter(lines[after])
+
+
+def _classify_lines(lines, following):
+    '''What every line is for the blank-line rules (see the kinds above).
+
+    The lookahead a classification needs is the next line with content: the
+    term of a definition list and the caption above a table are only that
+    because of the line under them. A line of a fenced code block is never
+    anything else - its content is code, whatever it looks like - and a table
+    or a list ends at the first line that is neither a row of it nor a line
+    that continues it.
+    '''
+    classified = []
+    fence = ''
+    in_table = False
+    in_list = False
+    lazy_quote = False
+    for index, line in enumerate(lines):
+        marker = _FENCE_MARKER_RE.match(line)
+        if marker or fence:
+            if marker:
+                char = marker.group(1)[0]
+                if not fence:
+                    fence = char
+                elif char == fence:
+                    fence = ''
+            classified.append(_Line(_FENCED, False))
+            continue
+        if not line.strip():
+            classified.append(_Line(_BLANK, False))
+            in_table = False
+            lazy_quote = False
+            continue
+
+        content = _strip_quote_prefix(line)
+        quoted = bool(_QUOTE_PREFIX_RE.match(line))
+        if in_table and _TABLE_ROW_RE.match(content):
+            classified.append(_Line(_TABLE, quoted))
+            lazy_quote = quoted
+            continue
+        in_table = False
+        if _THEMATIC_LINE_RE.match(content):
+            classified.append(_Line(_TEXT, quoted))
+            lazy_quote = False
+            continue
+        if _LIST_LINE_RE.match(content):
+            in_list = True
+            classified.append(_Line(_LIST, quoted))
+            lazy_quote = quoted
+            continue
+        if _DEF_ITEM_LINE_RE.match(content):
+            classified.append(_Line(_DEF_ITEM, quoted))
+            lazy_quote = quoted
+            continue
+        if _FOOTNOTE_LINE_RE.match(content):
+            classified.append(_Line(_FOOTNOTE, quoted))
+            lazy_quote = quoted
+            continue
+        if _TABLE_ROW_RE.match(content) and _starts_a_table(lines, following, index):
+            in_table = True
+            classified.append(_Line(_TABLE, quoted))
+            lazy_quote = quoted
+            continue
+        if in_list and content[:1] in (' ', '\t'):
+            # The second paragraph of a list item (the renderer indents it to
+            # the item's content column) or a block inside it.
+            classified.append(_Line(_LIST, quoted))
+            continue
+        if quoted:
+            classified.append(_Line(_QUOTE, quoted))
+            lazy_quote = True
+            continue
+        if lazy_quote:
+            # A quote is read up to the next blank line: a plain text line
+            # after a quote line is a lazy continuation line of the quote and
+            # the blank line after it is what ends the quote. The shape comes
+            # from a quoted <pre>, which the renderer writes without a ">"
+            # prefix; without this the whole rest of the file would be read
+            # as one lazy quote.
+            classified.append(_Line(_QUOTE, True))
+            continue
+        in_list = False
+        after = following[index]
+        if _starts_a_table(lines, following, after):
+            classified.append(_Line(_CAPTION, quoted))
+            continue
+        if after is not None \
+                and _DEF_ITEM_LINE_RE.match(_strip_quote_prefix(lines[after])):
+            classified.append(_Line(_DEF_TERM, quoted))
+            continue
+        classified.append(_Line(_TEXT, quoted))
+    return classified
+
+
+def _keeps_a_blank_line(previous, following):
+    '''True when the blank line between two content lines is structure.
+
+    'single' style drops the blank lines between paragraphs, so what is left
+    for this to answer is which of them are not a paragraph separation:
+
+    * the one that ends a quote block - a quote is read up to the next blank
+      line, so without it the line that follows is swallowed into the quote
+      as a lazy continuation line. The blank lines inside a quote are the
+      quote's own paragraph separations and go, quote content being text like
+      any other (it is reshaped inside the quote on the way back in);
+    * the ones around the blocks Markdown reads across consecutive lines (see
+      _STRUCTURE_KINDS) - a list, a table (its caption included), a
+      definition list and a footnote definition. Both sides count: the blank
+      line before such a block is what makes python-markdown recognize it,
+      and the one after it is what keeps the next paragraph from being read
+      as part of it. A quote line below such a block counts as well: a quote
+      interrupts a paragraph, not a list item, so without the blank line it
+      is read as a lazy continuation line of the item above it.
+    '''
+    if previous is None or following is None:
+        return False
+    if previous.quoted:
+        return not following.quoted
+    if previous.kind in _STRUCTURE_KINDS:
+        return True
+    if following.quoted:
+        # Entering a quote needs no blank line: a quote interrupts a paragraph.
+        return False
+    return following.kind in _STRUCTURE_KINDS
 
 
 def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
@@ -176,37 +382,37 @@ def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
 
     'block' (default) keeps the standard Markdown layout where a blank line
     separates paragraphs. 'single' drops blank lines so every content line
-    stands as its own paragraph line; the blank line that ends a quote block
-    is kept - it is what ends the quote, not a paragraph separation - and
-    blank lines inside a fenced code block are content and are preserved.
-    With blank_line_before_heading a blank line is (re)inserted before ATX
-    headings - except a heading that is the very first line of the file.
+    stands as its own paragraph line. What stays is the blank line that is
+    not a paragraph separation (see _keeps_a_blank_line): the blank lines
+    inside a fenced code block - they are content -, the one that ends a
+    quote block, and the ones around the blocks Markdown reads across
+    consecutive lines (a list, a table, a definition list, a footnote
+    definition). With blank_line_before_heading a blank line is (re)inserted
+    before ATX headings - except a heading that is the very first line of the
+    file.
     '''
     if not text or style != PARAGRAPH_STYLE_SINGLE:
         return text
     lines = text.splitlines()
-    following = _following_content_lines(lines)
+    following = _following_content_indexes(lines)
+    preceding = _preceding_content_indexes(lines)
+    classified = _classify_lines(lines, following)
     kept = []
-    fence = ''
-    previous = ''
     for index, line in enumerate(lines):
-        marker = _FENCE_MARKER_RE.match(line)
-        if marker:
-            char = marker.group(1)[0]
-            if not fence:
-                fence = char
-            elif char == fence:
-                fence = ''
-        if not fence and not line.strip():
-            if _ends_a_quote_block(previous, following[index]):
+        if classified[index].kind == _FENCED:
+            kept.append(line)
+            continue
+        if not line.strip():
+            before = preceding[index]
+            after = following[index]
+            if before is not None and after is not None \
+                    and _keeps_a_blank_line(classified[before], classified[after]):
                 kept.append(line)
             continue
-        if (blank_line_before_heading and not fence and kept
+        if (blank_line_before_heading and kept
                 and kept[-1].strip() and _HEADING_LINE_RE.match(line)):
             kept.append('')
         kept.append(line)
-        if line.strip():
-            previous = line
     return '\n'.join(kept) + '\n'
 
 

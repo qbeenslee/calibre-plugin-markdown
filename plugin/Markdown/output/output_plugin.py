@@ -30,7 +30,7 @@ LEGACY_CUSTOMIZATION_NAMES = ('Markdown',)
 class MarkdownOutput(TXTOutput):
     name = "Markdown Output"
     author = "Qbeenslee"
-    version = (3, 20, 8)
+    version = (3, 20, 9)
     file_type = "md"
     commit_name = "md_output"
     ui_data = {
@@ -197,8 +197,13 @@ class MarkdownOutput(TXTOutput):
             help=_(
                 "How paragraphs are separated. 'block' keeps the standard "
                 "Markdown layout where a blank line separates paragraphs. "
-                "'single' removes blank lines (code blocks are preserved) "
-                "so every line is its own paragraph."
+                "'single' drops the blank lines between paragraphs, so every "
+                "line is its own paragraph. The blank lines that are not a "
+                "paragraph separation stay: the ones inside a fenced code "
+                "block, the one that ends a quote block, and the ones around "
+                "a list, a table, a definition list and a footnote "
+                "definition - without them Markdown reads the text around "
+                "those blocks as part of them."
             ),
         ),
         OptionRecommendation(

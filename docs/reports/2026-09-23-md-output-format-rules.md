@@ -245,10 +245,28 @@ slug 由 `slugify()` 生成且全文唯一（重复加 `-2`、`-3`…），与�
 ### 6.2 段落样式
 
 - `block`（默认）：保持标准 Markdown 布局，空行分段，本步直接返回原文。
-- `single`：删除所有空行，让每行自成一个段落行。三个例外：
+- `single`：删除**段落之间**的空行，让每行自成一个段落行。保留下来的空行一律不是段落分隔：
   - **围栏代码块内的空行是内容**，保留；
   - **引用块结束处的空行保留**（它不是段落分隔，而是引用的终止，删掉会让下一行被吞进引用）；
+  - **块结构前后与内部的空行保留**：列表（含条目第二段那行空行 + 缩进）、表格（含上方 `*标题*` 行
+    与表头之间）、定义列表（`术语` 行前、`: 释义` 行后）、脚注定义块前。Markdown 要求这些块
+    在空行之后才被识别（python-markdown 根本不认段落里的列表/表格），块后没有空行时后一段会被读成
+    块的一部分：列表吞成条目里的 lazy continuation 行、表格吞成一行、定义列表吞成 `<dd>`；
   - `blank_line_before_heading`（默认开）时，在 `#` 标题前补一个空行，**文件第一行的标题不补**。
+
+  判断靠一份逐行分类（`_classify_lines`）：正文行之外还认出列表项与条目的续行、表格行、表格上方的
+  `*标题*` 行、定义列表的术语行与 `: ` 行、脚注定义行；围栏代码块内的行一律按内容处理。空行两侧
+  任一侧是这些结构就留下。两条补充规则照此收敛：
+
+  - **结构下方紧跟引用行时也要留空行**：引用能打断段落，打断不了列表项，所以 `- 项` / 表格行
+    下面那行 `>` 会被读成条目的 lazy continuation 行或表格的一行；
+  - **引用的 lazy continuation 行也算引用**：引用是读到下一个空行为止，所以引用行之后没有 `>`
+    前缀的正文行（渲染器写引用里的 `<pre>` 时不带前缀，就是这种行）仍属于引用，它后面那个空行是
+    引用的终止，删掉会把下面整段正文吞进引用。
+
+  **引用块内部不在此列**：引用是"自己的文本"，它内部的空行是引用的段落分隔，照旧删掉（只有引用
+  结束处那个保留），要写出引用内的分段得用只含 `>` 的行（输入侧就是这么写的，见 §10）。本步只做
+  减法：不往正文里新增空行（标题前那条是已有选项的行为）。
 
 ### 6.3 折行
 
@@ -336,7 +354,9 @@ def repair_margin_lengths(style):
 ## 10. 已知边界
 
 - **`single` 段落样式作用于整份文件**：YAML front matter 与目录块里的空行也会被去掉
-  （引用块结尾空行、围栏内空行仍保留）。
+  （引用块结尾空行、围栏内空行、块结构前后的空行仍保留，见 §6.2）。
+- **引用块内部的分段在 `single` 下会丢**：引用里列表/表格结束、后面仍是引用内容时，正确写法是
+  补一行只含 `>` 的行，本步不写（渲染器在 block 模式下那里也只是一个普通空行，属既有问题）。
 - **折行只作用于正文**：YAML、目录、封面不受 `max_line_length` 影响。
 - **转义默认关闭**：导出的 .md 里源文本中的 `(`、`#`、`*` 等都是字面量，再次当 Markdown 渲染时
   可能被解释为格式；需要"所见即所得"的场景请打开 `escape_markdown_chars`。
@@ -351,11 +371,17 @@ def repair_margin_lengths(style):
 
 ## 11. 验证
 
-- 单元测试：`.venv/bin/python -m pytest plugin/tests -q` → **484 passed**（2026-09-26 基线）。
+- 单元测试：`.venv/bin/python -m pytest plugin/tests -q` → **505 passed**（2026-09-26 基线）。
   覆盖本报告各条的测试：`test_blockquote.py`、`test_heading_anchors.py`、`test_heading_inline.py`、`test_escape_chars.py`、
-  `test_paragraph_style.py`、`test_keep_image_sizes.py`、`test_image_size.py`、`test_image_formats.py`、
+  `test_paragraph_style.py`（§6.2 的每一条空行规则）、`test_keep_image_sizes.py`、`test_image_size.py`、`test_image_formats.py`、
   `test_image_export.py`、`test_remote_images.py`、`test_broken_css_margins.py`、`test_cover_page.py`、
   `test_library_metadata.py`、`test_output_options.py`、`test_helpers_baseline.py`、`test_list_items.py`。
+- 段落样式的空行验收：`scripts/probe_single_style_blank_lines.py`（calibre-debug 跑）——把每种「块结构 +
+  前后正文」的 block 版交给 `apply_paragraph_style(text, 'single')`，再用 python-markdown 渲染两边比对
+  HTML，24/24 结构案例一致；引用内分段那一条标为 `deferred`（见 §10）。
+- 真机验收：`scripts/verify_single_style_blank_lines.py`（calibre-debug）——371/394/427/818/17/919 六本
+  真书各转 block 与 single 两版，渲染后比对**块结构指纹**（列表/表格/定义列表/代码/标题/引用的元素及
+  其文本，引用按合并后的文本计），6/6 一致，且 single 版空行明显更少。
 - 真机验收（calibre-debug，改源码树即可跑）：`scripts/verify_blockquote.py`、
   `scripts/verify_quote_paragraphs.py`、`scripts/verify_escape_chars.py`、
   `scripts/verify_keep_image_sizes.py`、`scripts/verify_webp_export.py`、

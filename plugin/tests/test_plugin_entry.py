@@ -32,6 +32,15 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
+    # 3.20.9: 'single' (one paragraph per line) keeps the blank lines that are
+    # not a paragraph separation: inside a fenced code block, at the end of a
+    # quote block, and around the blocks Markdown reads across consecutive
+    # lines - a list (an item's further paragraphs included), a table (its
+    # caption included), a definition list and a footnote definition. Without
+    # them the text around those blocks was read as part of them: the
+    # paragraph after a list became a line of the last item, the one after a
+    # table a row of it, and python-markdown never started a list or a table
+    # inside a paragraph at all. The blank lines between paragraphs still go.
     # 3.20.8: the output renderer is split into one mixin per rendering domain
     # (output/renderers/); the generated Markdown is unchanged.
     # 3.20.7: the text of a list item stays on its own "- " line. Books wrap
@@ -97,10 +106,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.8'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 8)
-    assert MarkdownOutput.version == (3, 20, 8)
-    assert MarkdownInput.version == (3, 20, 8)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.9'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 9)
+    assert MarkdownOutput.version == (3, 20, 9)
+    assert MarkdownInput.version == (3, 20, 9)
 
 
 def test_plugin_names():
