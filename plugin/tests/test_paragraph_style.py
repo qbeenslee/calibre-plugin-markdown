@@ -3,10 +3,10 @@
 
 'block' (default) keeps the standard Markdown layout where a blank line
 separates paragraphs. 'single' drops blank lines so every content line
-stands as its own paragraph line - except the ones that are not a paragraph
-separation: the blank lines inside a fenced code block, the one that ends a
-quote block, and the ones around the blocks Markdown reads across consecutive
-lines (a list, a table, a definition list, a footnote definition).
+stands as its own paragraph line, and writes a blank line before and after
+every block instead - a fenced code block, a quote block, a thematic break,
+a list, a table with its caption, a definition list and a footnote
+definition. A heading gets the blank line before it, never one after it.
 """
 
 from calibre_plugins.markdown.output.convert_flow import apply_prefs_to_opts
@@ -53,6 +53,7 @@ SINGLE_TEXT = (
     '# One {#one}\n'
     'First paragraph.\n'
     'Second paragraph.\n'
+    '\n'
     '```python\n'
     'keep = [\n\n'
     ']\n'
@@ -67,10 +68,9 @@ SINGLE_TEXT = (
 
 
 def test_single_style_drops_blank_lines():
-    # What is left of the blank lines: the code block's own, and the ones that
-    # keep the structures (the TOC list, the table) apart from the text around
-    # them - the blank line after the table included, a quote line below it
-    # being read as a row of the table otherwise.
+    # What is left of the blank lines: the ones around the blocks - the TOC
+    # list, the code block, the table, the quote at the end - and the one
+    # before the heading. The paragraphs are compacted onto their own lines.
     assert apply_paragraph_style(BLOCK_TEXT, 'single') == SINGLE_TEXT
 
 
@@ -101,15 +101,11 @@ QUOTE_BREAK_TEXT = (
 )
 
 
-def test_single_style_keeps_the_blank_line_that_ends_a_quote():
-    # It is not a paragraph separation: a quote is read up to the next blank
-    # line, so without it the line after the quote is swallowed into it.
-    assert apply_paragraph_style(QUOTE_BREAK_TEXT, 'single') == (
-        '第一段。\n'
-        '> 结束语：\n'
-        '> 好累，第一次写文，居然还是长篇。\n'
-        '\n'
-        '第二段。\n')
+def test_single_style_keeps_the_blank_lines_around_a_quote():
+    # A quote is read up to the next blank line, so the one after it keeps the
+    # line below out of the quote; the one before it is what the block is
+    # written apart from the text above it with.
+    assert apply_paragraph_style(QUOTE_BREAK_TEXT, 'single') == QUOTE_BREAK_TEXT
 
 
 def test_single_style_keeps_the_quote_break_before_a_heading():
@@ -117,10 +113,10 @@ def test_single_style_keeps_the_quote_break_before_a_heading():
     assert apply_paragraph_style(text, 'single') == text
 
 
-def test_single_style_drops_the_quote_break_at_the_end_of_the_text():
+def test_single_style_writes_no_blank_line_after_the_last_block():
     # Nothing follows: there is no line to keep out of the quote.
     assert apply_paragraph_style('正文\n\n> 引用\n\n', 'single') == \
-        '正文\n> 引用\n'
+        '正文\n\n> 引用\n'
 
 
 def test_single_style_still_drops_the_blank_lines_between_paragraphs():
@@ -128,10 +124,13 @@ def test_single_style_still_drops_the_blank_lines_between_paragraphs():
         '第一段。\n第二段。\n'
 
 
-def test_single_style_still_drops_the_blank_line_between_two_quotes():
-    # Two quotes in a row are one quote block either way, and a quote line is
-    # a paragraph line of its own once the file is read back as 'single'.
+def test_single_style_drops_the_blank_line_between_two_quotes():
+    # The blank lines a quote carries are the quote's own paragraph
+    # separations: two quote blocks written one under the other are read as
+    # one, and a quote line is a paragraph line of its own once the file is
+    # read back as 'single'.
     assert apply_paragraph_style('> 甲\n\n> 乙\n', 'single') == '> 甲\n> 乙\n'
+    assert apply_paragraph_style('> 甲\n> 乙\n', 'single') == '> 甲\n> 乙\n'
 
 
 # The blocks Markdown reads across consecutive lines. The blank lines around
@@ -192,12 +191,11 @@ def test_single_style_keeps_the_blank_line_before_footnote_definitions():
     assert apply_paragraph_style(text, 'single') == text
 
 
-def test_single_style_keeps_the_blank_line_after_a_quoted_list():
-    # The quote ends here, and that blank line is what ends it (the line above
-    # the quoted list needs none: a quote interrupts a paragraph).
+def test_single_style_keeps_the_blank_lines_around_a_quoted_list():
+    # A quoted list is a block of the quote around it, not of the list inside
+    # it: the blank lines go around the quote.
     text = '第一段。\n\n> - 甲\n> - 乙\n\n第二段。\n'
-    assert apply_paragraph_style(text, 'single') == \
-        '第一段。\n> - 甲\n> - 乙\n\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == text
 
 
 def test_single_style_keeps_the_blank_line_between_a_list_item_and_a_quote():
@@ -209,11 +207,10 @@ def test_single_style_keeps_the_blank_line_between_a_list_item_and_a_quote():
 
 def test_single_style_ends_a_quote_that_carries_unprefixed_lines():
     # A quoted <pre> is written without the ">" prefix, so its lines are lazy
-    # continuation lines of the quote: the blank line after them is what ends
-    # the quote, and without it the paragraph below is swallowed into it.
+    # continuation lines of the quote: they are of the quote's block, and the
+    # blank lines go around it.
     text = '正文。\n\n> 引文\ncode 行\n\n正文二。\n'
-    assert apply_paragraph_style(text, 'single') == \
-        '正文。\n> 引文\ncode 行\n\n正文二。\n'
+    assert apply_paragraph_style(text, 'single') == text
 
 
 def test_single_style_collapses_a_run_of_blank_lines_to_one():
@@ -226,30 +223,65 @@ def test_single_style_collapses_a_run_of_blank_lines_to_one():
 
 def test_single_style_keeps_a_run_of_blank_lines_inside_a_fence():
     # Inside a code block the blank lines are content, not separations: they
-    # are kept as they are written, run or not.
+    # are kept as they are written, run or not. The ones around the fence are
+    # written either way.
     text = 'para\n\n~~~\n\n\nstill code\n~~~\n\nafter\n'
-    assert apply_paragraph_style(text, 'single') == \
-        'para\n~~~\n\n\nstill code\n~~~\nafter\n'
+    assert apply_paragraph_style(text, 'single') == text
 
 
-def test_single_style_still_drops_the_blank_lines_around_a_fence():
-    # A fenced code block interrupts a paragraph and needs no blank line
-    # around it either, so 'single' stays compact there.
+def test_single_style_keeps_the_blank_lines_around_a_fence():
+    # A fenced code block reads as a block of its own either way; written
+    # apart from the paragraphs around it, the file stays readable where the
+    # renderer put a block inside a run of prose.
     text = '第一段。\n\n```\ncode\n```\n\n第二段。\n'
-    assert apply_paragraph_style(text, 'single') == \
-        '第一段。\n```\ncode\n```\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == text
 
 
-def test_single_style_still_drops_the_blank_lines_around_a_thematic_break():
+def test_single_style_keeps_the_blank_lines_around_a_thematic_break():
     text = '第一段。\n\n* * *\n\n第二段。\n'
-    assert apply_paragraph_style(text, 'single') == \
-        '第一段。\n* * *\n第二段。\n'
+    assert apply_paragraph_style(text, 'single') == text
 
 
-def test_single_style_still_drops_the_blank_line_before_a_quote():
-    # A quote interrupts a paragraph: the line above it needs no blank line.
+def test_single_style_keeps_the_blank_line_before_a_quote():
     text = '第一段。\n\n> 引用\n'
-    assert apply_paragraph_style(text, 'single') == '第一段。\n> 引用\n'
+    assert apply_paragraph_style(text, 'single') == text
+
+
+def test_single_style_keeps_a_closing_delimiter_with_its_block():
+    # A quote written in italics opens its "*" on the line the quote starts
+    # and closes it on a line of its own under the last line of the quote.
+    # A blank line in front of that line leaves the run it closes unmatched
+    # (the "*" comes back as text) and the line under it inside the quote.
+    text = '正文。\n\n> *引文。\n*\n\n正文二。\n'
+    assert apply_paragraph_style(text, 'single') == text
+    assert apply_paragraph_style('正文。\n> *引文。\n*\n正文二。\n', 'single') == \
+        '正文。\n\n> *引文。\n*\n\n正文二。\n'
+
+
+# A block is written a blank line before and after it whether the source has
+# them or not: what 'single' drops is the blank line between two paragraphs.
+
+BLOCK_IN_PROSE = '正文。\n- 甲\n- 乙\n正文二。\n'
+
+
+def test_single_style_writes_the_blank_lines_a_block_needs():
+    assert apply_paragraph_style(BLOCK_IN_PROSE, 'single') == \
+        '正文。\n\n- 甲\n- 乙\n\n正文二。\n'
+
+
+def test_single_style_writes_no_blank_line_before_the_first_block():
+    assert apply_paragraph_style('- 甲\n- 乙\n正文二。\n', 'single') == \
+        '- 甲\n- 乙\n\n正文二。\n'
+
+
+def test_single_style_writes_no_blank_line_after_the_last_block():
+    assert apply_paragraph_style('正文。\n- 甲\n- 乙\n', 'single') == \
+        '正文。\n\n- 甲\n- 乙\n'
+
+
+def test_single_style_writes_one_blank_line_between_two_blocks():
+    assert apply_paragraph_style('- 甲\n- 乙\n| a |\n|---|\n', 'single') == \
+        '- 甲\n- 乙\n\n| a |\n|---|\n'
 
 
 def test_a_pipe_line_without_an_alignment_row_is_not_a_table():
@@ -276,7 +308,7 @@ def test_default_style_argument_is_block():
 def test_tilde_fence_content_is_preserved():
     text = 'para\n\n~~~\n\nstill code\n~~~\n\nafter\n'
     out = apply_paragraph_style(text, 'single')
-    assert out == 'para\n~~~\n\nstill code\n~~~\nafter\n'
+    assert out == text
 
 
 HEADING_TEXT = (
@@ -328,7 +360,17 @@ def test_heading_blank_line_after_front_matter():
 def test_heading_blank_line_not_inside_fence():
     text = 'para\n```python\n# not a heading\n```\n# Real\n'
     out = apply_paragraph_style(text, 'single', True)
-    assert out == 'para\n```python\n# not a heading\n```\n\n# Real\n'
+    assert out == 'para\n\n```python\n# not a heading\n```\n\n# Real\n'
+
+
+def test_single_style_leaves_the_yaml_front_matter_alone():
+    # Its rules read as thematic breaks and would be given blank lines of
+    # their own, which breaks the front matter: it is written as it stands.
+    text = '---\ntitle: X\n---\n正文。\n'
+    assert apply_paragraph_style(text, 'single', True) == text
+    assert apply_paragraph_style('---\ntitle: X\n---\n* * *\n正文\n',
+                                 'single', True) == \
+        '---\ntitle: X\n---\n\n* * *\n\n正文\n'
 
 
 def test_blank_line_before_heading_registered():

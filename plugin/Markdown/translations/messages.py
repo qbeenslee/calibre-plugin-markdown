@@ -548,16 +548,18 @@ _register_option_help((
     (
         "How paragraphs are separated. 'block' keeps the standard Markdown "
         "layout where a blank line separates paragraphs. 'single' drops the "
-        "blank lines between paragraphs, so every line is its own paragraph. "
-        "The blank lines that are not a paragraph separation stay: the ones "
-        "inside a fenced code block, the one that ends a quote block, and the "
-        "ones around a list, a table, a definition list and a footnote "
-        "definition - without them Markdown reads the text around those "
-        "blocks as part of them.",
+        "blank lines between paragraphs, so every line is its own paragraph, "
+        "and writes a blank line before and after every block instead: a "
+        "fenced code block, a quote block, a thematic break, a list, a table "
+        "with its caption, a definition list and a footnote definition - "
+        "without them Markdown reads the text around those blocks as part of "
+        "them. The blank lines inside a fenced code block stay as they are "
+        "written; they are content.",
         "段落分隔方式。'block' 为标准 Markdown 版式，用空行分段；'single' 去掉段落"
-        "之间的空行，每行自成一段。不是段落分隔的空行会保留：围栏代码块内部、引用块"
-        "结束处，以及列表/表格/定义列表/脚注定义前后——去掉这些空行，Markdown 会把块"
-        "前后的文字读成块的一部分。",
+        "之间的空行，每行自成一段，改为在每个块的前后各写一个空行：围栏代码块、引用"
+        "块、分隔线、列表、表格（含表题）、定义列表、脚注定义——去掉这些空行，"
+        "Markdown 会把块前后的文字读成块的一部分。围栏代码块内部的空行原样保留，"
+        "它们是代码内容。",
     ),
     (
         "Insert a blank line before # headings when the paragraph style is "

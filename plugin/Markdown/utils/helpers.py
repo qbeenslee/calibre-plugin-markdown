@@ -160,6 +160,12 @@ _TABLE_CELL_RE = re.compile(r':?-+:?')
 _DEF_ITEM_LINE_RE = re.compile(r'^[ \t]*:[ \t]')
 #: A footnote definition, "[^1]: 正文".
 _FOOTNOTE_LINE_RE = re.compile(r'^[ \t]*\[\^[^\]]+\]:')
+#: A line that carries nothing but the delimiters a run of emphasis is closed
+#: with: a quote written in italics opens its "*" on the line the quote starts
+#: and closes it on a line of its own, under the last line of the quote. The
+#: list reading would call it a bullet with no content, and the blank line a
+#: block gets in front of it leaves the run it closes unmatched.
+_DELIMITER_LINE_RE = re.compile(r'^ {0,3}(?:\*{1,2}|_{1,2}|~{2})[ \t]*$')
 
 #: What one line of the finished Markdown is for the 'single' style's
 #: blank-line rules: the structure it carries (one of the kinds below) and
@@ -186,18 +192,44 @@ _DEF_TERM = 'def-term'
 _DEF_ITEM = 'def-item'
 #: A footnote definition, "[^1]: 正文".
 _FOOTNOTE = 'footnote'
-#: Everything else: paragraphs, headings, "* * *", the lines of inline HTML.
+#: A thematic break, "* * *".
+_THEMATIC = 'thematic'
+#: Everything else: paragraphs, headings, the lines of inline HTML.
 _TEXT = 'text'
+#: Not a kind a line is classified as - a heading is a heading only on the
+#: line it is written on, whatever the classification of that line is - but
+#: the block one heading line is for the blank lines.
+_HEADING = 'heading'
+#: The group the term line of a definition list and its ": 释义" line share:
+#: the two are one block, a term being a term only with its definition under
+#: it.
+_DEF = 'def'
 
-#: The kinds a blank line has to stay away from: the blocks Markdown reads
-#: across consecutive lines. Dropping the blank line between one of them and
-#: the text around it does not separate two paragraphs - it lets the text be
-#: read as part of the block (a following paragraph line becomes a lazy
-#: continuation of a list item, a row of a table, the definition of the term
-#: above it) or stops the block from being recognized at all (python-markdown
-#: never starts a list or a table inside a paragraph).
-_STRUCTURE_KINDS = frozenset((
-    _LIST, _TABLE, _CAPTION, _DEF_TERM, _DEF_ITEM, _FOOTNOTE))
+#: The block group a kind's lines belong to for the blank-line rules:
+#: consecutive lines of one group, with no blank line between them, are one
+#: block (the rows of a table, the items of a list). A block named here is
+#: one a blank line is written before and after; a caption has a group of its
+#: own, the table under it being a table only with a blank line above it.
+#: _TEXT names no group: a paragraph is the text 'single' compacts.
+#:
+#: The groups are the blocks Markdown reads across consecutive lines (a list,
+#: a table, a definition list, a footnote definition - dropping the blank
+#: line around one lets the text next to it be read as part of it, and
+#: python-markdown never starts one inside a paragraph), a quote block (a
+#: quote is read up to the next blank line), a fenced code block and a
+#: thematic break - written apart from the text around them, which keeps
+#: 'single' readable where the renderer put a block inside a run of prose.
+_BLOCK_GROUPS = {
+    _FENCED: _FENCED,
+    _LIST: _LIST,
+    _TABLE: _TABLE,
+    _CAPTION: _CAPTION,
+    _DEF_TERM: _DEF,
+    _DEF_ITEM: _DEF,
+    _FOOTNOTE: _FOOTNOTE,
+    _QUOTE: _QUOTE,
+    _THEMATIC: _THEMATIC,
+}
 
 
 def _following_content_indexes(lines):
@@ -209,17 +241,6 @@ def _following_content_indexes(lines):
         if lines[index].strip():
             next_index = index
     return following
-
-
-def _preceding_content_indexes(lines):
-    '''For every line, the index of the previous line with content (None before the start).'''
-    preceding = [None] * len(lines)
-    previous_index = None
-    for index, line in enumerate(lines):
-        preceding[index] = previous_index
-        if line.strip():
-            previous_index = index
-    return preceding
 
 
 def _strip_quote_prefix(line):
@@ -292,7 +313,7 @@ def _classify_lines(lines, following):
             continue
         in_table = False
         if _THEMATIC_LINE_RE.match(content):
-            classified.append(_Line(_TEXT, quoted))
+            classified.append(_Line(_THEMATIC, quoted))
             lazy_quote = False
             continue
         if _LIST_LINE_RE.match(content):
@@ -344,36 +365,93 @@ def _classify_lines(lines, following):
     return classified
 
 
-def _keeps_a_blank_line(previous, following):
-    '''True when the blank line between two content lines is structure.
+def _block_group(line_info):
+    '''The block group a classified line belongs to - None for a paragraph.
 
-    'single' style drops the blank lines between paragraphs, so what is left
-    for this to answer is which of them are not a paragraph separation:
-
-    * the one that ends a quote block - a quote is read up to the next blank
-      line, so without it the line that follows is swallowed into the quote
-      as a lazy continuation line. The blank lines inside a quote are the
-      quote's own paragraph separations and go, quote content being text like
-      any other (it is reshaped inside the quote on the way back in);
-    * the ones around the blocks Markdown reads across consecutive lines (see
-      _STRUCTURE_KINDS) - a list, a table (its caption included), a
-      definition list and a footnote definition. Both sides count: the blank
-      line before such a block is what makes python-markdown recognize it,
-      and the one after it is what keeps the next paragraph from being read
-      as part of it. A quote line below such a block counts as well: a quote
-      interrupts a paragraph, not a list item, so without the blank line it
-      is read as a lazy continuation line of the item above it.
+    A line inside a quote is of the quote's group whatever it carries: a
+    quoted list is a list inside a quote block, and what the blank line has
+    to end is the quote, not the list.
     '''
-    if previous is None or following is None:
-        return False
-    if previous.quoted:
-        return not following.quoted
-    if previous.kind in _STRUCTURE_KINDS:
-        return True
-    if following.quoted:
-        # Entering a quote needs no blank line: a quote interrupts a paragraph.
-        return False
-    return following.kind in _STRUCTURE_KINDS
+    if line_info.quoted:
+        return _QUOTE
+    return _BLOCK_GROUPS.get(line_info.kind)
+
+
+#: The lines of one block: the group it belongs to (None for a run of
+#: paragraph lines, _HEADING for one heading line) and the indexes of its
+#: lines.
+_Block = namedtuple('_Block', 'group indexes')
+
+
+def _content_blocks(lines, classified):
+    '''Group the content lines into the blocks the blank lines go around.
+
+    Consecutive lines of one group are one block - the rows of a table, the
+    items of a list - and a blank line or a line of another group ends one:
+    what follows a blank line is a block of its own (the second paragraph of
+    a list item, the table under its caption), and a line of another group is
+    a block the blank line between the two separates. A heading line is a
+    block of its own whatever it follows, so that the blank line it may need
+    above it is written for it and not for the text above.
+
+    A quote is the exception: the blank lines inside one are the quote's own
+    paragraph separations and go, so quote lines stay one block whatever is
+    between them - two quote blocks written one under the other are read as
+    one, and a quote line is a paragraph line of its own once the file is
+    read back as 'single'.
+
+    The blank lines inside a fenced code block are content: they are
+    classified as fenced lines of the block, so they never end it.
+    '''
+    blocks = []
+    ended = True
+    for index, line in enumerate(lines):
+        info = classified[index]
+        if not line.strip() and info.kind != _FENCED:
+            ended = True
+            continue
+        group = _block_group(info)
+        heading = info.kind != _FENCED and _HEADING_LINE_RE.match(line)
+        if blocks and not heading and _DELIMITER_LINE_RE.match(line):
+            # The delimiters closing a run the renderer opened above belong to
+            # the block that opened it, blank line or not.
+            group = blocks[-1].group
+            ended = False
+        elif ended and group == _QUOTE and blocks \
+                and blocks[-1].group == _QUOTE:
+            # The blank lines a quote carries are its own paragraph
+            # separations: they go, so the quote stays one block.
+            ended = False
+        if ended or heading or group is None \
+                or not blocks or blocks[-1].group != group:
+            blocks.append(_Block(_HEADING if heading else group, [index]))
+        else:
+            blocks[-1].indexes.append(index)
+        ended = False
+    return blocks
+
+
+#: The "---" rule that opens and closes the YAML front matter.
+_FRONT_MATTER_RULE = '---'
+
+
+def _split_front_matter(lines):
+    '''The YAML front matter at the top of the file, and the lines under it.
+
+    Its rules read as thematic breaks (and a field whose value is a comment
+    as a heading), so the blank lines this module writes would land inside
+    the front matter and break it. It is taken out whole - a front matter
+    holds no blank line of its own - and written back as it stands.
+    '''
+    if not lines or lines[0].strip() != _FRONT_MATTER_RULE:
+        return [], lines
+    for index in range(1, len(lines)):
+        line = lines[index].strip()
+        if not line:
+            break
+        if line == _FRONT_MATTER_RULE:
+            return lines[:index + 1], lines[index + 1:]
+    return [], lines
 
 
 def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
@@ -382,14 +460,13 @@ def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
 
     'block' (default) keeps the standard Markdown layout where a blank line
     separates paragraphs. 'single' drops blank lines so every content line
-    stands as its own paragraph line. What stays is the blank line that is
-    not a paragraph separation (see _keeps_a_blank_line): the blank lines
-    inside a fenced code block - they are content -, the one that ends a
-    quote block, and the ones around the blocks Markdown reads across
-    consecutive     lines (a list, a table, a definition list, a footnote
-    definition). With blank_line_before_heading a blank line is (re)inserted
-    before ATX headings - except a heading that is the very first line of the
-    file.
+    stands as its own paragraph line, and writes one before and one after
+    every block instead (see _BLOCK_GROUPS): a fenced code block, a quote
+    block, a thematic break, a list, a table with its caption, a definition
+    list and a footnote definition. A block at the very start or end of the
+    file gets the one blank line it has a side to get it on. With
+    blank_line_before_heading a heading gets a blank line before it as well -
+    never after it, and never a heading that is the first line of the file.
 
     A run of blank lines the renderer left (a soft scene break from the CSS
     margins of the book, on top of the block's own newlines) collapses to the
@@ -399,27 +476,29 @@ def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
     if not text or style != PARAGRAPH_STYLE_SINGLE:
         return text
     lines = text.splitlines()
+    front_matter, lines = _split_front_matter(lines)
     following = _following_content_indexes(lines)
-    preceding = _preceding_content_indexes(lines)
     classified = _classify_lines(lines, following)
+    blocks = _content_blocks(lines, classified)
     kept = []
-    for index, line in enumerate(lines):
-        if classified[index].kind == _FENCED:
-            kept.append(line)
-            continue
-        if not line.strip():
-            before = preceding[index]
-            after = following[index]
-            if before is not None and after is not None \
-                    and _keeps_a_blank_line(classified[before], classified[after]) \
-                    and (not kept or kept[-1].strip()):
-                kept.append(line)
-            continue
-        if (blank_line_before_heading and kept
-                and kept[-1].strip() and _HEADING_LINE_RE.match(line)):
+    for position, block in enumerate(blocks):
+        after = block.group is not None and block.group != _HEADING
+        before = after or (block.group == _HEADING
+                           and blank_line_before_heading)
+        # The front matter above is content of its own, so the first block
+        # under it is not the first block of the file.
+        if (position or front_matter) and (
+                before or (position
+                           and blocks[position - 1].group
+                           not in (None, _HEADING))):
             kept.append('')
-        kept.append(line)
-    return '\n'.join(kept) + '\n'
+        kept.extend(lines[index] for index in block.indexes)
+    if not front_matter:
+        return '\n'.join(kept) + '\n'
+    head = '\n'.join(front_matter) + '\n'
+    if not kept:
+        return head
+    return head + '\n'.join(kept) + '\n'
 
 
 TITLEPAGE_BASENAMES = frozenset(('titlepage.xhtml', 'titlepage.html'))

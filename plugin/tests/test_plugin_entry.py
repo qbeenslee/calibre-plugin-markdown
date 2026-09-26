@@ -32,15 +32,24 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
-    # 3.20.9: 'single' (one paragraph per line) keeps the blank lines that are
-    # not a paragraph separation: inside a fenced code block, at the end of a
-    # quote block, and around the blocks Markdown reads across consecutive
-    # lines - a list (an item's further paragraphs included), a table (its
-    # caption included), a definition list and a footnote definition. Without
-    # them the text around those blocks was read as part of them: the
-    # paragraph after a list became a line of the last item, the one after a
-    # table a row of it, and python-markdown never started a list or a table
-    # inside a paragraph at all. The blank lines between paragraphs still go.
+    # 3.20.10: 'single' (one paragraph per line) writes a blank line before
+    # and after every block instead of keeping the ones the source happens to
+    # have: a fenced code block, a quote block, a thematic break, a list (an
+    # item's further paragraphs included), a table (its caption included), a
+    # definition list and a footnote definition. What used to be a keep/drop
+    # decision is a guarantee now, so a block the renderer wrote inside a run
+    # of prose gets the blank lines around it too, and a quote block gets one
+    # above it as well as the one below it that ends it. The blank lines
+    # between paragraphs still go, and a heading still gets one above it only.
+    # 3.20.9: 'single' kept the blank lines that are not a paragraph
+    # separation: inside a fenced code block, at the end of a quote block,
+    # and around the blocks Markdown reads across consecutive lines - a list
+    # (an item's further paragraphs included), a table (its caption
+    # included), a definition list and a footnote definition. Without them
+    # the text around those blocks was read as part of them: the paragraph
+    # after a list became a line of the last item, the one after a table a
+    # row of it, and python-markdown never started a list or a table inside a
+    # paragraph at all. The blank lines between paragraphs still go.
     # 3.20.8: the output renderer is split into one mixin per rendering domain
     # (output/renderers/); the generated Markdown is unchanged.
     # 3.20.7: the text of a list item stays on its own "- " line. Books wrap
@@ -106,10 +115,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.9'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 9)
-    assert MarkdownOutput.version == (3, 20, 9)
-    assert MarkdownInput.version == (3, 20, 9)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.10'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 10)
+    assert MarkdownOutput.version == (3, 20, 10)
+    assert MarkdownInput.version == (3, 20, 10)
 
 
 def test_plugin_names():
