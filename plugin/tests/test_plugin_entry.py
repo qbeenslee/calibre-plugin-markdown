@@ -32,6 +32,12 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
+    # 3.20.11: <hr> is written "***". Upstream writes the thematic break as
+    # "* * *" - the same break, spelled the way a bulleted list with three
+    # empty items looks; "***" is the spelling the rest of the Markdown world
+    # uses, and python-markdown reads both as <hr>. Everything else about the
+    # element (the scene breaks its margins ask for, the newlines around it,
+    # its tail) stays as calibre writes it, so the marker is all that moved.
     # 3.20.10: 'single' (one paragraph per line) writes a blank line before
     # and after every block instead of keeping the ones the source happens to
     # have: a fenced code block, a quote block, a thematic break, a list (an
@@ -115,10 +121,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.10'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 10)
-    assert MarkdownOutput.version == (3, 20, 10)
-    assert MarkdownInput.version == (3, 20, 10)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.11'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 11)
+    assert MarkdownOutput.version == (3, 20, 11)
+    assert MarkdownInput.version == (3, 20, 11)
 
 
 def test_plugin_names():

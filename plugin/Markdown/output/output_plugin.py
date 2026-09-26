@@ -30,7 +30,7 @@ LEGACY_CUSTOMIZATION_NAMES = ('Markdown',)
 class MarkdownOutput(TXTOutput):
     name = "Markdown Output"
     author = "Qbeenslee"
-    version = (3, 20, 10)
+    version = (3, 20, 11)
     file_type = "md"
     commit_name = "md_output"
     ui_data = {

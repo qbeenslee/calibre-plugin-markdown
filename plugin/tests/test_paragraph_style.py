@@ -238,8 +238,11 @@ def test_single_style_keeps_the_blank_lines_around_a_fence():
 
 
 def test_single_style_keeps_the_blank_lines_around_a_thematic_break():
-    text = '第一段。\n\n* * *\n\n第二段。\n'
-    assert apply_paragraph_style(text, 'single') == text
+    # "* * *" is the spelling an older build wrote; the renderer writes "***"
+    # now, and both read as the same thematic break.
+    for rule in ('* * *', '***', '- - -', '___'):
+        text = '第一段。\n\n%s\n\n第二段。\n' % rule
+        assert apply_paragraph_style(text, 'single') == text
 
 
 def test_single_style_keeps_the_blank_line_before_a_quote():

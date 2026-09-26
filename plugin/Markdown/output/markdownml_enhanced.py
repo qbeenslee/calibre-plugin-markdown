@@ -249,6 +249,15 @@ class EnhancedMarkdownMLizer(
         if tag == 'blockquote':
             return self._dump_blockquote(elem, stylizer)
 
+        if tag == 'hr':
+            # Upstream writes the break as "* * *" - the same thematic break,
+            # spelled as a row of bullets, which is what it looks like at a
+            # glance. "***" is the spelling everywhere else. The scene breaks
+            # the element's margins ask for and its tail come from upstream,
+            # so the marker is the only thing this replaces.
+            return [fragment.replace('* * *', '***')
+                    for fragment in super().dump_text(elem, stylizer)]
+
         if tag in ('li', 'div', 'aside', 'section', 'p'):
             if self._capture_footnote_definition(elem, stylizer):
                 tail = self._tail_fragment(elem)

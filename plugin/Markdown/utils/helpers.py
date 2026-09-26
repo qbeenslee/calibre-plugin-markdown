@@ -147,7 +147,7 @@ _QUOTE_PREFIX_RE = re.compile(r'^(?: {0,3}>[ \t]?)+')
 #: A line that opens a list item - the spelling the renderers write ("- 项",
 #: "1. 项", nested with tabs or two spaces) and the CommonMark one besides.
 _LIST_LINE_RE = re.compile(r'^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)')
-#: A thematic break. The '<hr>' the renderer writes is "* * *", which only the
+#: A thematic break. The '<hr>' the renderer writes is "***", which only the
 #: thematic break reading makes sense of: as a list item it is not a block the
 #: blank lines around it have to be kept for (a thematic break interrupts a
 #: paragraph and needs no blank line at all).
@@ -192,7 +192,7 @@ _DEF_TERM = 'def-term'
 _DEF_ITEM = 'def-item'
 #: A footnote definition, "[^1]: 正文".
 _FOOTNOTE = 'footnote'
-#: A thematic break, "* * *".
+#: A thematic break, "***".
 _THEMATIC = 'thematic'
 #: Everything else: paragraphs, headings, the lines of inline HTML.
 _TEXT = 'text'
