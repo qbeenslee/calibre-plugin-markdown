@@ -13,8 +13,10 @@ line). Text that follows the quote directly gets that blank line written for
 it here, since nothing else will.
 """
 
+import re
 import types
 
+from calibre.ebooks.txt.markdownml import MarkdownMLizer
 from calibre_plugins.markdown.output.markdownml_enhanced import (
     EnhancedMarkdownMLizer,
 )
@@ -60,6 +62,8 @@ class FakeElem:
         self.tail = tail
         self.attrib = {}
         self.children = list(children)
+        for child in self.children:
+            child._parent = self
 
     def __iter__(self):
         return iter(self.children)
@@ -68,7 +72,7 @@ class FakeElem:
         return len(self.children)
 
     def getparent(self):
-        return None
+        return getattr(self, '_parent', None)
 
 
 def _mlizer(**opts):
@@ -94,6 +98,50 @@ def _paragraph_dump(mlizer, recorded=None):
                              mlizer.style_italic, mlizer.style_bold))
         return ['\n' + '> ' * mlizer.blockquotes, elem.text or '', '\n']
     return dump
+
+
+def _install_upstream_inline_dump(monkeypatch):
+    """Provide the calibre behavior involved in paragraph/em/br rendering."""
+    def remove_newlines(self, text):
+        text = re.sub(r'[\r\n]+', ' ', text)
+        text = re.sub(r'[ ]{2,}', ' ', text)
+        if self.remove_space_after_newline:
+            text = text.lstrip(' ')
+            self.remove_space_after_newline = False
+        return text
+
+    def dump_text(self, elem, stylizer):
+        tag = local_name(elem.tag)
+        style = stylizer.style(elem)
+        text = []
+        closes_line = tag == 'p'
+        if closes_line:
+            text.append('\n' + '> ' * self.blockquotes)
+            self.remove_space_after_newline = True
+        opens_italic = (tag == 'em' or style['font-style'] == 'italic') \
+            and not self.style_italic
+        if opens_italic:
+            text.append('*')
+            self.style_italic = True
+        if tag == 'br':
+            text.append('  \n')
+            self.remove_space_after_newline = True
+        if elem.text:
+            text.append(self.remove_newlines(elem.text))
+        for child in elem:
+            text += self.dump_text(child, stylizer)
+        if opens_italic:
+            self.style_italic = False
+            text.append('*')
+        if closes_line:
+            text.append('\n')
+        if elem.tail:
+            text.append(self.remove_newlines(elem.tail))
+        return text
+
+    monkeypatch.setattr(MarkdownMLizer, 'dump_text', dump_text, raising=False)
+    monkeypatch.setattr(MarkdownMLizer, 'remove_newlines', remove_newlines,
+                        raising=False)
 
 
 def _styled(quote, **overrides):
@@ -166,9 +214,9 @@ def test_paragraph_tail_space_does_not_leave_a_whitespace_line():
     assert out == '\n> q\n'
 
 
-def test_hard_line_break_at_the_end_is_kept():
-    # A <br> at the end of the quote is content ("  \n"): dropping it would
-    # lose the break the book asked for.
+def test_quote_cleanup_keeps_an_already_rendered_hard_break():
+    # Quote cleanup only trims whitespace fragments. A hard break emitted by
+    # another renderer is content; trailing <br> is filtered before this step.
     mlizer = _mlizer()
     mlizer.dump_text = lambda elem, stylizer: ['\n> q  \n']
     quote = FakeElem('blockquote', children=[FakeElem('p')])
@@ -176,6 +224,47 @@ def test_hard_line_break_at_the_end_is_kept():
     out = ''.join(mlizer._dump_blockquote(quote, FakeStylizer()))
 
     assert out == '\n> q  \n'
+
+
+def test_trailing_br_inside_italic_quote_is_redundant(monkeypatch):
+    _install_upstream_inline_dump(monkeypatch)
+    br = FakeElem('br', tail='\n')
+    emphasis = FakeElem('em', text='最近有点时间，所以多写点，之后可能就没这么快了。',
+                        children=[br])
+    paragraph = FakeElem('p', children=[emphasis])
+    quote = FakeElem('blockquote', text='\n', children=[paragraph])
+    italic = FakeStyle(**{'font-style': 'italic'})
+    styles = {id(quote): italic, id(paragraph): italic,
+              id(emphasis): italic, id(br): italic}
+
+    out = ''.join(_mlizer().dump_text(quote, FakeStylizer(styles)))
+
+    assert out == '\n> *最近有点时间，所以多写点，之后可能就没这么快了。*\n'
+
+
+def test_trailing_br_inside_plain_paragraph_is_redundant(monkeypatch):
+    _install_upstream_inline_dump(monkeypatch)
+    paragraph = FakeElem('p', children=[
+        FakeElem('em', text='正文', children=[FakeElem('br')])])
+
+    out = ''.join(_mlizer().dump_text(paragraph, FakeStylizer()))
+
+    assert out == '\n*正文*\n'
+
+
+def test_nonterminal_br_inside_italic_quote_keeps_break_and_prefix(monkeypatch):
+    _install_upstream_inline_dump(monkeypatch)
+    br = FakeElem('br', tail='第二行')
+    emphasis = FakeElem('em', text='第一行', children=[br])
+    paragraph = FakeElem('p', children=[emphasis])
+    quote = FakeElem('blockquote', text='\n', children=[paragraph])
+    italic = FakeStyle(**{'font-style': 'italic'})
+    styles = {id(quote): italic, id(paragraph): italic,
+              id(emphasis): italic, id(br): italic}
+
+    out = ''.join(_mlizer().dump_text(quote, FakeStylizer(styles)))
+
+    assert out == '\n> *第一行  \n> 第二行*\n'
 
 
 def test_tail_is_separated_from_the_quote_by_a_blank_line():

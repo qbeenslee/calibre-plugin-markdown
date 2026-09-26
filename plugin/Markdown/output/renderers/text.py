@@ -10,6 +10,9 @@ import os
 import re
 from urllib.parse import unquote
 
+from calibre_plugins.markdown.utils.helpers import local_name
+from calibre_plugins.markdown.output.renderers.primitives import BLOCK_LEVEL_TAGS
+
 
 #: The characters calibre's MarkdownMLizer escapes in body text. The set is
 #: mirrored here (instead of calling the inherited method) so that switching
@@ -76,6 +79,40 @@ class TextMixin(object):
         if hasattr(elem, 'tail') and elem.tail:
             return self._format_fragment(elem.tail)
         return ''
+
+    def _is_trailing_break(self, elem):
+        """True when elem is the last content before its nearest block ends."""
+        current = elem
+        while True:
+            if getattr(current, 'tail', None) \
+                    and current.tail.strip():
+                return False
+            parent = current.getparent()
+            if parent is None:
+                return False
+            found = False
+            for sibling in parent:
+                if sibling is current:
+                    found = True
+                elif found and (local_name(getattr(sibling, 'tag', None))
+                                or (getattr(sibling, 'tail', None)
+                                    and sibling.tail.strip())):
+                    return False
+            if not found:
+                return False
+            if local_name(getattr(parent, 'tag', None)) in BLOCK_LEVEL_TAGS:
+                return True
+            current = parent
+
+    def _dump_line_break(self, elem):
+        self.remove_space_after_newline = True
+        tail = self._tail_fragment(elem)
+        if self._is_trailing_break(elem):
+            return ['']
+        text = ['  \n' + '> ' * self.blockquotes]
+        if tail:
+            text.append(tail)
+        return text
 
     def _contains_token(self, text, token):
         if not text:

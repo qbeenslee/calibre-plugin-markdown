@@ -221,6 +221,9 @@ class EnhancedMarkdownMLizer(
         if self._in_heading and tag not in HEADING_INLINE_TAGS:
             return self._dump_heading_inline(elem, stylizer)
 
+        if tag == 'br':
+            return self._dump_line_break(elem)
+
         if self._item_line and tag in BLOCK_LEVEL_TAGS:
             if tag in ITEM_LINE_BLOCKS:
                 return self._dump_item_block(elem, stylizer, tag, style)

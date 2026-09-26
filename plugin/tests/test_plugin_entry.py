@@ -32,6 +32,10 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
+    # 3.20.12: a <br> at the end of a block is redundant and is omitted. A
+    # real break inside a quote stays a Markdown hard break, and the continued
+    # line gets its own "> " prefix; this keeps an enclosing emphasis marker
+    # from being stranded on a line of its own.
     # 3.20.11: <hr> is written "***". Upstream writes the thematic break as
     # "* * *" - the same break, spelled the way a bulleted list with three
     # empty items looks; "***" is the spelling the rest of the Markdown world
@@ -121,10 +125,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.11'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 11)
-    assert MarkdownOutput.version == (3, 20, 11)
-    assert MarkdownInput.version == (3, 20, 11)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.12'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 12)
+    assert MarkdownOutput.version == (3, 20, 12)
+    assert MarkdownInput.version == (3, 20, 12)
 
 
 def test_plugin_names():
