@@ -386,10 +386,15 @@ def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
     not a paragraph separation (see _keeps_a_blank_line): the blank lines
     inside a fenced code block - they are content -, the one that ends a
     quote block, and the ones around the blocks Markdown reads across
-    consecutive lines (a list, a table, a definition list, a footnote
+    consecutive     lines (a list, a table, a definition list, a footnote
     definition). With blank_line_before_heading a blank line is (re)inserted
     before ATX headings - except a heading that is the very first line of the
     file.
+
+    A run of blank lines the renderer left (a soft scene break from the CSS
+    margins of the book, on top of the block's own newlines) collapses to the
+    one blank line that does the separating - the blank lines inside a fenced
+    code block are content and are kept as they are written.
     '''
     if not text or style != PARAGRAPH_STYLE_SINGLE:
         return text
@@ -406,7 +411,8 @@ def apply_paragraph_style(text, style=PARAGRAPH_STYLE_BLOCK,
             before = preceding[index]
             after = following[index]
             if before is not None and after is not None \
-                    and _keeps_a_blank_line(classified[before], classified[after]):
+                    and _keeps_a_blank_line(classified[before], classified[after]) \
+                    and (not kept or kept[-1].strip()):
                 kept.append(line)
             continue
         if (blank_line_before_heading and kept

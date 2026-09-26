@@ -216,6 +216,22 @@ def test_single_style_ends_a_quote_that_carries_unprefixed_lines():
         '正文。\n> 引文\ncode 行\n\n正文二。\n'
 
 
+def test_single_style_collapses_a_run_of_blank_lines_to_one():
+    # The book's CSS margins write a soft scene break on top of the block's
+    # own newlines; one blank line is what separates the blocks.
+    text = '正文。\n\n\n\n\n- 甲\n- 乙\n\n正文二。\n'
+    assert apply_paragraph_style(text, 'single') == \
+        '正文。\n\n- 甲\n- 乙\n\n正文二。\n'
+
+
+def test_single_style_keeps_a_run_of_blank_lines_inside_a_fence():
+    # Inside a code block the blank lines are content, not separations: they
+    # are kept as they are written, run or not.
+    text = 'para\n\n~~~\n\n\nstill code\n~~~\n\nafter\n'
+    assert apply_paragraph_style(text, 'single') == \
+        'para\n~~~\n\n\nstill code\n~~~\nafter\n'
+
+
 def test_single_style_still_drops_the_blank_lines_around_a_fence():
     # A fenced code block interrupts a paragraph and needs no blank line
     # around it either, so 'single' stays compact there.

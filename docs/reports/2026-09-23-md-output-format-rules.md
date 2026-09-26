@@ -266,7 +266,8 @@ slug 由 `slugify()` 生成且全文唯一（重复加 `-2`、`-3`…），与�
 
   **引用块内部不在此列**：引用是"自己的文本"，它内部的空行是引用的段落分隔，照旧删掉（只有引用
   结束处那个保留），要写出引用内的分段得用只含 `>` 的行（输入侧就是这么写的，见 §10）。本步只做
-  减法：不往正文里新增空行（标题前那条是已有选项的行为）。
+  减法：不往正文里新增空行（标题前那条是已有选项的行为）。同一处的空行串（软场景分隔叠上块自身
+  换行）合并成一个，围栏内的不动。完整清单见 `2026-09-26-md-output-blank-lines.md`。
 
 ### 6.3 折行
 
@@ -371,7 +372,7 @@ def repair_margin_lengths(style):
 
 ## 11. 验证
 
-- 单元测试：`.venv/bin/python -m pytest plugin/tests -q` → **505 passed**（2026-09-26 基线）。
+- 单元测试：`.venv/bin/python -m pytest plugin/tests -q` → **507 passed**（2026-09-26 基线）。
   覆盖本报告各条的测试：`test_blockquote.py`、`test_heading_anchors.py`、`test_heading_inline.py`、`test_escape_chars.py`、
   `test_paragraph_style.py`（§6.2 的每一条空行规则）、`test_keep_image_sizes.py`、`test_image_size.py`、`test_image_formats.py`、
   `test_image_export.py`、`test_remote_images.py`、`test_broken_css_margins.py`、`test_cover_page.py`、
