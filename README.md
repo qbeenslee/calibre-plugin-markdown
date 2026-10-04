@@ -2,7 +2,6 @@
 
 让 Markdown 成为 calibre 的一等公民：**电子书 → Markdown**（输出格式 `md`），以及 **Markdown → 电子书**（输入格式 `md` / `markdown`，自动回填书库图片）。
 
-- 当前版本：`3.20.7`（以 `plugin/Markdown/__init__.py` 的 `PLUGIN_VERSION` 为准）
 - 依赖：calibre ≥ 6.0.0（macOS / Windows / Linux）
 - 许可：GPLv3
 
