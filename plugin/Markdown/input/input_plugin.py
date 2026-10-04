@@ -7,15 +7,25 @@ from the image folders next to it in the calibre library. TXT Input then
 cannot resolve the relative image references and the output EPUB ships
 without the image files. This input plugin resolves the book folder through
 the injected metadata opf (calibre uuid -> read-only library lookup) and
-stages the missing images into the input folder, where the standard TXT
-Input resource handling picks them up.
+stages the missing images where the standard TXT Input resource handling
+picks them up - a folder of its own inside the input folder, named per
+conversion and removed with it (see _staging_dir_for).
 
-Any folder next to the .md counts - the 'images/' folder this plugin's
-output side writes, and 'assets/', 'media/' or any other name a hand-built
-bundle uses. A reference spelled with URL escapes ('assets/%E3%80%90.jpg',
-how other tools write non-ASCII file names) is decoded before the file is
-looked up and the reference is rewritten to the decoded path, because both
-the lookup and TXT Input's resource handling resolve literal paths only.
+Any folder inside the book folder counts - the 'images/' folder this
+plugin's output side writes, and 'assets/', 'media/' or any other name a
+hand-built bundle uses. A reference spelled with URL escapes
+('assets/%E3%80%90.jpg', how other tools write non-ASCII file names) is
+decoded before the file is looked up and the reference is rewritten to the
+decoded path, because both the lookup and TXT Input's resource handling
+resolve literal paths only.
+
+The input folder itself is neither trusted nor written to once the book
+folder is known. GUI and bulk conversions hand TXT Input a copy of the book
+file in calibre's session-wide temporary folder, so that folder holds the
+input copies of every conversion of the session: a file sitting in it under
+the name a reference uses may be another book's image, staged there by an
+earlier conversion. Only the book folder answers a reference then, and what
+staging writes goes into the conversion's own folder.
 
 On top of TXT Input's options this plugin adds the conversion dialog pane
 (input/conversion_ui.PluginWidget):
@@ -31,9 +41,9 @@ On top of TXT Input's options this plugin adds the conversion dialog pane
                           references (default) or drop them all
   * embed_images        - stage/embed the local images (default) or leave
                           image references as they are
-  * download_remote_images - download http(s) images next to the input and
-                          embed them like local ones (default; requires
-                          keep_images and embed_images)
+  * download_remote_images - download http(s) images into the conversion's
+                          own folder and embed them like local ones (default;
+                          requires keep_images and embed_images)
   * keep_image_sizes    - keep the width/height the Markdown declares on its
                           images (default) or drop them
   * markdown_extensions - which python-markdown extensions to enable
@@ -50,6 +60,7 @@ import hashlib
 import os
 import re
 import shutil
+import uuid
 from html import unescape as _html_unescape
 from urllib.parse import unquote as _url_unquote
 
@@ -79,6 +90,9 @@ from calibre_plugins.markdown.utils.prefs import (
 #: URL schemes that never name a local file we could stage.
 _REMOTE_SCHEMES = frozenset(
     ('http', 'https', 'ftp', 'file', 'data', 'mailto'))
+
+#: Name prefix of the per-conversion staging folder inside the input folder.
+_STAGING_PREFIX = 'md-stage-'
 
 _UNRESOLVED_MESSAGE = (
     'Markdown: {} image reference(s) could not be found next to the input '
@@ -367,7 +381,7 @@ def _image_in_book_folder(book_dir, rel):
 class MarkdownInput(TXTInput):
     name = 'Markdown Input'
     author = 'Qbeenslee'
-    version = (3, 20, 12)
+    version = (3, 20, 13)
     description = _('Convert Markdown files to HTML, with library images.')
     file_types = {'md', 'markdown'}
     commit_name = 'markdown_input'
@@ -441,8 +455,15 @@ class MarkdownInput(TXTInput):
         self._book_dir = resolve_book_dir_for_options(options, log)
         self._yaml_language = ''
         self._shifted_by_content = {}
+        self._staging_dir = None
         stream = self._prepare_stream(stream, options, log)
-        oeb = super().convert(stream, options, file_ext, log, accelerators)
+        try:
+            oeb = super().convert(stream, options, file_ext, log, accelerators)
+        finally:
+            # Nothing staged may outlive the conversion that staged it: the
+            # input folder is shared with every other conversion of the
+            # session (see _staging_dir_for).
+            self._discard_staged_files()
         self._apply_yaml_language(oeb)
         return oeb
 
@@ -669,7 +690,7 @@ class MarkdownInput(TXTInput):
             self, '_download_remote_images', True)
 
     def _fetch_remote_images(self, html, base_dir):
-        """Download remote images next to the input; rewrite their src.
+        """Download remote images into the staging folder; rewrite their src.
 
         Named apart from the _download_remote_images switch this runs for.
         The rewritten references are ordinary local ones, so the builtin
@@ -685,16 +706,20 @@ class MarkdownInput(TXTInput):
             return html
         if not urls:
             return html
+        dest_dir = self._staging_dir_for(base_dir)
+        # The staging folder is this conversion's own; it holds nothing but
+        # the files staged so far, so the names to avoid are exactly those.
         reserved = (
-            set(os.listdir(base_dir)) if os.path.isdir(base_dir) else set())
+            set(os.listdir(dest_dir)) if os.path.isdir(dest_dir) else set())
         names = {}
         failed = []
         for url in urls:
-            name = save_remote_image(_html_unescape(url), base_dir, reserved)
+            name = save_remote_image(_html_unescape(url), dest_dir, reserved)
             if name is None:
                 failed.append(url)
                 continue
-            names[url] = name
+            names[url] = self._staging_src(base_dir, os.path.join(
+                dest_dir, name))
         if names:
             html, _count = rewrite_remote_image_refs(html, names)
             self._log_debug('downloaded %d remote image(s)' % len(names))
@@ -722,14 +747,67 @@ class MarkdownInput(TXTInput):
     def _wants_image_sizes(self):
         return getattr(self, '_keep_image_sizes', True)
 
-    def _stage_library_images(self, html, base_dir):
-        """Copy the book folder's images next to the input; decode references.
+    def _staging_dir_for(self, base_dir):
+        """Path of this conversion's own staging folder (created on write).
 
-        A file already next to the input file is left to the builtin
-        fix_resources, path checks included. References that resolve nowhere
-        are reported: silently dropping them is the failure mode this plugin
-        exists to prevent. Returns the html to hand on, with every reference
-        that had to be decoded pointing at the path it actually resolved to.
+        The folder sits inside the input folder, because the builtin
+        resource handling resolves references against that folder only, but
+        it is never the input folder itself. For GUI and bulk conversions
+        the input folder is calibre's session-wide temporary folder - the
+        copied input files of every conversion of the session sit in it -
+        so a file staged there would be read as "the image next to the
+        input" by the next conversion that references the same name. The
+        random name keeps every conversion (and every concurrently running
+        one) to its own files; convert() removes the folder again through
+        _discard_staged_files().
+        """
+        root = getattr(self, '_staging_dir', None)
+        if root is None:
+            root = os.path.join(
+                base_dir, _STAGING_PREFIX + uuid.uuid4().hex[:12])
+            self._staging_dir = root
+        return root
+
+    def _staging_src(self, base_dir, path):
+        """The reference spelling for a file inside the staging folder."""
+        return os.path.relpath(path, base_dir).replace(os.sep, '/')
+
+    def _stage_image(self, base_dir, source, rel):
+        """Copy one image into the staging folder; return its src spelling.
+
+        None means the copy failed: the reference is left unresolved (and
+        reported) rather than pointed at a file that is not there. A file
+        staged under the same name earlier in this conversion is already the
+        image this call would write, so it is not copied twice.
+        """
+        dest = os.path.join(self._staging_dir_for(base_dir), rel)
+        try:
+            if not _readable_file(dest):
+                parent = os.path.dirname(dest)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                shutil.copy2(source, dest)
+        except OSError as exc:
+            self._log_debug('could not stage image %s: %r' % (source, exc))
+            return None
+        self._log_debug('staged library image %s as %s' % (
+            source, self._staging_src(base_dir, dest)))
+        return self._staging_src(base_dir, dest)
+
+    def _discard_staged_files(self):
+        """Remove the staging folder and everything in it (best effort)."""
+        root = getattr(self, '_staging_dir', None)
+        self._staging_dir = None
+        if root and os.path.isdir(root):
+            shutil.rmtree(root, ignore_errors=True)
+
+    def _stage_library_images(self, html, base_dir):
+        """Stage the book folder's images; rewrite the references to them.
+
+        References that resolve nowhere are reported: silently dropping
+        them is the failure mode this plugin exists to prevent. Returns the
+        html to hand on, with every reference pointing at the file it
+        actually resolved to inside the staging folder.
         """
         if not html or not base_dir:
             return html
@@ -753,46 +831,50 @@ class MarkdownInput(TXTInput):
                 rewrites[str(src)] = resolved
         if rewrites:
             html, count = rewrite_html_image_srcs(html, rewrites)
-            self._log_debug('decoded %d image reference(s) to the path they '
-                            'resolved to' % count)
+            self._log_debug('rewrote %d image reference(s) to the staged '
+                            'copies' % count)
         if unresolved:
             self._warn_unresolved(unresolved)
         return html
 
     def _resolve_local_image(self, src, base_dir, book_dir):
-        """Resolve one reference against the input folder and the book folder.
+        """Resolve one reference against the book folder or the input folder.
 
-        Returns '' when nothing has to change (not a local relative file, or
-        the image already sits next to the input under the spelling the
-        Markdown uses), the decoded relative path when the reference was
-        rewritten to it, and None when the image is found nowhere. The
-        literal spelling always wins, so a file really named 'a%20b.jpg'
-        keeps working.
+        With a book folder - GUI and bulk conversions hand the metadata opf
+        over - that folder is the only place a reference is looked up: the
+        input folder is calibre's session-wide temporary folder there, so a
+        file sitting in it under the same name is another conversion's
+        (possibly another book's) leftover, not this book's image. The
+        image is staged into this conversion's own folder and the reference
+        is rewritten to point at the copy.
+
+        Without a book folder - CLI conversions, where the input file still
+        sits next to its images - the input folder is the folder the Markdown
+        means, so the reference resolves there and nothing is copied.
+        Returns '' when nothing has to change, the new src spelling when the
+        reference was rewritten, and None when the image is found nowhere.
+        The literal spelling is always tried before the decoded one, so a
+        file really named 'a%20b.jpg' keeps working.
         """
         rel = _local_image_relpath(src)
         if rel is None:
             return ''
+        decoded = _decoded_image_relpath(src)
+        if book_dir:
+            for candidate in (rel, decoded):
+                if candidate is None:
+                    continue
+                source = _image_in_book_folder(book_dir, candidate)
+                if source is None:
+                    continue
+                return self._stage_image(base_dir, source, candidate)
+            return None
         if _readable_file(os.path.join(base_dir, rel)):
             return ''
-        decoded = _decoded_image_relpath(src)
         if decoded is not None and _readable_file(
                 os.path.join(base_dir, decoded)):
             self._log_debug('using the decoded image name %s' % decoded)
             return decoded
-        for candidate in (rel, decoded):
-            if candidate is None:
-                continue
-            source = _image_in_book_folder(book_dir, candidate)
-            if source is None:
-                continue
-            dest = os.path.join(base_dir, candidate)
-            parent = os.path.dirname(dest)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            shutil.copy2(source, dest)
-            self._log_debug(
-                'staged library image %s as %s' % (source, candidate))
-            return candidate if candidate != rel else ''
         return None
 
     def _warn_unresolved(self, refs):

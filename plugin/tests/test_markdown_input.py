@@ -2,6 +2,7 @@
 """Markdown input: staged library images plus the pane's option handling."""
 
 import codecs
+import os
 import types
 
 import pytest
@@ -69,6 +70,30 @@ def _book_folder(tmp_path, name='book'):
     return book
 
 
+def _staged(plugin):
+    """The files this conversion staged, keyed by their path in the folder.
+
+    The staging folder is private to the conversion and its name is random,
+    so it is read off the plugin; the folder itself is never the input
+    folder, which is what the tests below are about.
+    """
+    root = getattr(plugin, '_staging_dir', None)
+    assert root, 'nothing was staged'
+    files = {}
+    for dirpath, _dirs, names in os.walk(root):
+        for name in names:
+            path = os.path.join(dirpath, name)
+            with open(path, 'rb') as handle:
+                files[os.path.relpath(path, root).replace(os.sep, '/')] = \
+                    handle.read()
+    return files
+
+
+def _staged_src(plugin, rel):
+    """The src spelling a file staged under `rel` gets in the html."""
+    return '%s/%s' % (os.path.basename(plugin._staging_dir), rel)
+
+
 def test_missing_image_is_staged_from_the_book_folder(tmp_path, monkeypatch):
     base = tmp_path / 'input'
     base.mkdir()
@@ -78,24 +103,36 @@ def test_missing_image_is_staged_from_the_book_folder(tmp_path, monkeypatch):
     plugin._book_dir = str(book)
     _refs(monkeypatch, 'images/1.jpg')
 
-    plugin._stage_library_images('<img src="images/1.jpg"/>', str(base))
+    out = plugin._stage_library_images('<img src="images/1.jpg"/>', str(base))
 
-    assert (base / 'images' / '1.jpg').read_bytes() == JPEG
+    assert _staged(plugin) == {'images/1.jpg': JPEG}
+    assert out == '<img src="%s"/>' % _staged_src(plugin, 'images/1.jpg')
 
 
-def test_image_next_to_the_input_file_wins(tmp_path, monkeypatch):
+def test_the_book_folder_wins_over_a_file_next_to_the_input(
+        tmp_path, monkeypatch):
+    """The cross-book image mixup: a same-named file next to the input loses.
+
+    base_dir is calibre's session-wide temporary folder for GUI and bulk
+    conversions, so 'images/1.jpg' sitting in it can be another book's image
+    staged by an earlier conversion of the same session. The book folder is
+    the only folder that may answer a reference then.
+    """
     base = tmp_path / 'input'
     (base / 'images').mkdir(parents=True)
-    (base / 'images' / '1.jpg').write_bytes(b'local')
+    (base / 'images' / '1.jpg').write_bytes(b'another book')
     book = _book_folder(tmp_path)
     (book / 'images' / '1.jpg').write_bytes(JPEG)
     plugin = MarkdownInput()
     plugin._book_dir = str(book)
     _refs(monkeypatch, 'images/1.jpg')
 
-    plugin._stage_library_images('<img src="images/1.jpg"/>', str(base))
+    out = plugin._stage_library_images('<img src="images/1.jpg"/>', str(base))
 
-    assert (base / 'images' / '1.jpg').read_bytes() == b'local'
+    assert _staged(plugin) == {'images/1.jpg': JPEG}
+    assert out == '<img src="%s"/>' % _staged_src(plugin, 'images/1.jpg')
+    # The input folder is not written to: the leftover stays untouched.
+    assert (base / 'images' / '1.jpg').read_bytes() == b'another book'
 
 
 def test_image_missing_everywhere_writes_nothing(tmp_path, monkeypatch):
@@ -123,7 +160,7 @@ def test_image_at_the_book_folder_root_is_found(tmp_path, monkeypatch):
 
     plugin._stage_library_images('<img src="images/1.jpg"/>', str(base))
 
-    assert (base / 'images' / '1.jpg').read_bytes() == JPEG
+    assert _staged(plugin) == {'images/1.jpg': JPEG}
 
 
 @pytest.mark.parametrize('src', [
@@ -183,9 +220,72 @@ def test_fix_resources_stages_then_delegates(tmp_path, monkeypatch):
     _refs(monkeypatch, 'images/1.jpg')
     html = '<img src="images/1.jpg"/>'
 
-    assert plugin.fix_resources(html, str(base)) == html
-    assert (base / 'images' / '1.jpg').read_bytes() == JPEG
-    assert plugin.fix_resources_seen == (html, str(base))
+    out = plugin.fix_resources(html, str(base))
+
+    assert _staged(plugin) == {'images/1.jpg': JPEG}
+    assert out == '<img src="%s"/>' % _staged_src(plugin, 'images/1.jpg')
+    # The builtin resource handling is handed the rewritten html, and it
+    # resolves the staged copy against the same input folder.
+    assert plugin.fix_resources_seen == (out, str(base))
+
+
+def test_staged_files_are_removed_with_the_conversion(tmp_path, monkeypatch):
+    """Nothing staged may outlive the conversion that staged it.
+
+    The input folder is shared with every other conversion of the session
+    (it is calibre's session-wide temporary folder for GUI conversions), so
+    a staged file left behind is exactly what the next book's identical
+    reference would resolve to.
+    """
+    from calibre.ebooks.conversion.plugins.txt_input import TXTInput
+
+    base = tmp_path / 'input'
+    base.mkdir()
+    book = _book_folder(tmp_path)
+    (book / 'images' / '1.jpg').write_bytes(JPEG)
+    plugin = MarkdownInput()
+    seen = {}
+
+    def fake_convert(self, stream, options, file_ext, log, accelerators):
+        # What TXT Input does between the staging and the resource handling.
+        self.fix_resources('<img src="images/1.jpg"/>', str(base))
+        seen['staged'] = _staged(self)
+        return None
+
+    monkeypatch.setattr(TXTInput, 'convert', fake_convert)
+    monkeypatch.setattr(input_mod, 'resolve_book_dir_for_options',
+                        lambda opts, log: str(book))
+    _refs(monkeypatch, 'images/1.jpg')
+
+    plugin.convert(_Stream(BODY), _md_options(), 'md', None, {})
+
+    assert seen['staged'] == {'images/1.jpg': JPEG}
+    assert list(base.iterdir()) == []
+
+
+def test_staging_is_removed_even_when_the_conversion_fails(
+        tmp_path, monkeypatch):
+    from calibre.ebooks.conversion.plugins.txt_input import TXTInput
+
+    base = tmp_path / 'input'
+    base.mkdir()
+    book = _book_folder(tmp_path)
+    (book / 'images' / '1.jpg').write_bytes(JPEG)
+    plugin = MarkdownInput()
+
+    def boom(self, stream, options, file_ext, log, accelerators):
+        self.fix_resources('<img src="images/1.jpg"/>', str(base))
+        raise RuntimeError('conversion failed')
+
+    monkeypatch.setattr(TXTInput, 'convert', boom)
+    monkeypatch.setattr(input_mod, 'resolve_book_dir_for_options',
+                        lambda opts, log: str(book))
+    _refs(monkeypatch, 'images/1.jpg')
+
+    with pytest.raises(RuntimeError):
+        plugin.convert(_Stream(BODY), _md_options(), 'md', None, {})
+
+    assert list(base.iterdir()) == []
 
 
 def test_register_markdown_input_plugin(monkeypatch):

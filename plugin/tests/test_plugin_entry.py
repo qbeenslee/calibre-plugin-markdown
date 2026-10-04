@@ -32,6 +32,12 @@ def test_input_plugin_claims_markdown_only():
 
 
 def test_version_constants_agree():
+    # 3.20.13: MD -> EPUB 时暂存的图片不再串书。GUI/批量转换把书的 MD 副本
+    # 放进 calibre 的会话级临时目录，而暂存图片原来就写在这个共享目录里、
+    # 用完不删：先转换 B、再转换 A 时，A 的 images/000001.png 引用命中了 B
+    # 留下的同名文件，A 的 EPUB 里于是出现 B 的图片。现在暂存写在每次转换
+    # 自己的随机子目录里（md-stage-*），转换结束即删除，且书目录已知时只认
+    # 书目录里的图片，共享目录里的同名文件一概不当数。
     # 3.20.12: a <br> at the end of a block is redundant and is omitted. A
     # real break inside a quote stays a Markdown hard break, and the continued
     # line gets its own "> " prefix; this keeps an enclosing emphasis marker
@@ -125,10 +131,10 @@ def test_version_constants_agree():
     # tag or the ![]() spelling) is a paragraph of its own too: 'single'
     # separates it from the line below it instead of packing both into one
     # <p>.
-    assert plugin_pkg.PLUGIN_VERSION == '3.20.12'
-    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 12)
-    assert MarkdownOutput.version == (3, 20, 12)
-    assert MarkdownInput.version == (3, 20, 12)
+    assert plugin_pkg.PLUGIN_VERSION == '3.20.13'
+    assert plugin_pkg.PLUGIN_VERSION_TUPLE == (3, 20, 13)
+    assert MarkdownOutput.version == (3, 20, 13)
+    assert MarkdownInput.version == (3, 20, 13)
 
 
 def test_plugin_names():

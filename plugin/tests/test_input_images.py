@@ -6,6 +6,7 @@ importable in the venv) and urlopen is faked, so nothing here touches the
 network or a real widget toolkit.
 """
 
+import os
 import pathlib
 
 import calibre_plugins.markdown.utils.remote_images as ri
@@ -85,6 +86,30 @@ def _plugin(**flags):
     return plugin
 
 
+def _staged(plugin):
+    """The files this conversion staged, keyed by their path in the folder.
+
+    The staging folder is private to the conversion and its name is random,
+    so it is read off the plugin; the folder itself is never the input
+    folder, which is calibre's session-wide temporary folder.
+    """
+    root = getattr(plugin, '_staging_dir', None)
+    assert root, 'nothing was staged'
+    files = {}
+    for dirpath, _dirs, names in os.walk(root):
+        for name in names:
+            path = os.path.join(dirpath, name)
+            with open(path, 'rb') as handle:
+                files[os.path.relpath(path, root).replace(os.sep, '/')] = \
+                    handle.read()
+    return files
+
+
+def _staged_src(plugin, rel):
+    """The src spelling a file staged under `rel` gets in the html."""
+    return '%s/%s' % (os.path.basename(plugin._staging_dir), rel)
+
+
 # ------------------------------------------------------------- keep_images
 
 def test_keep_images_off_strips_every_img(tmp_path, monkeypatch):
@@ -126,7 +151,11 @@ def test_embed_images_on_stages_library_images(tmp_path, monkeypatch):
 
     plugin.fix_resources('<img src="images/1.jpg"/>', str(base))
 
-    assert (base / 'images' / '1.jpg').read_bytes() == JPEG
+    assert _staged(plugin) == {'images/1.jpg': JPEG}
+    assert plugin.fix_resources_seen[0] == '<img src="%s"/>' % _staged_src(
+        plugin, 'images/1.jpg')
+    # The input folder holds nothing but this conversion's staging folder.
+    assert os.listdir(base) == [os.path.basename(plugin._staging_dir)]
 
 
 def test_embed_images_off_skips_staging(tmp_path, monkeypatch):
@@ -180,8 +209,8 @@ def test_encoded_reference_is_staged_from_the_book_folder(
 
     out = plugin.fix_resources('<img src="%s"/>' % ENCODED, str(base))
 
-    assert (base / 'assets' / DECODED_NAME).read_bytes() == JPEG
-    assert 'src="%s"' % DECODED in out
+    assert _staged(plugin) == {'assets/%s' % DECODED_NAME: JPEG}
+    assert 'src="%s"' % _staged_src(plugin, 'assets/%s' % DECODED_NAME) in out
     assert ENCODED not in out
     assert plugin.log.warnings == []
 
@@ -250,7 +279,8 @@ def test_rewrite_html_image_srcs_handles_escaped_spellings():
 
 # ---------------------------------------------------- download_remote_images
 
-def test_download_rewrites_src_and_lands_next_to_input(tmp_path, monkeypatch):
+def test_download_rewrites_src_and_lands_in_the_conversion_folder(
+        tmp_path, monkeypatch):
     _refs(monkeypatch)
     _patch_urlopen(monkeypatch, {URL: FakeResponse()})
     base = tmp_path / 'in'
@@ -260,9 +290,9 @@ def test_download_rewrites_src_and_lands_next_to_input(tmp_path, monkeypatch):
 
     plugin.fix_resources(html, str(base))
 
-    assert (base / '21_b6cbe1.png').read_bytes() == PNG
+    assert _staged(plugin) == {'21_b6cbe1.png': PNG}
     seen = plugin.fix_resources_seen[0]
-    assert 'src="21_b6cbe1.png"' in seen
+    assert 'src="%s"' % _staged_src(plugin, '21_b6cbe1.png') in seen
     assert URL not in seen
 
 
@@ -311,8 +341,9 @@ def test_html_escaped_url_is_fetched_unescaped_and_rewritten(
     plugin.fix_resources(html, str(base))
 
     assert seen_urls == [raw]
-    assert (base / 'pic.png').read_bytes() == PNG
-    assert 'src="pic.png"' in plugin.fix_resources_seen[0]
+    assert _staged(plugin) == {'pic.png': PNG}
+    assert 'src="%s"' % _staged_src(plugin, 'pic.png') in \
+        plugin.fix_resources_seen[0]
 
 
 def test_duplicate_basenames_get_suffixes(tmp_path, monkeypatch):
@@ -327,10 +358,10 @@ def test_duplicate_basenames_get_suffixes(tmp_path, monkeypatch):
 
     plugin.fix_resources(html, str(base))
 
-    assert (base / 'pic.png').read_bytes() == PNG
-    assert (base / 'pic-2.png').read_bytes() == PNG
+    assert _staged(plugin) == {'pic.png': PNG, 'pic-2.png': PNG}
     seen = plugin.fix_resources_seen[0]
-    assert 'src="pic.png"' in seen and 'src="pic-2.png"' in seen
+    for rel in ('pic.png', 'pic-2.png'):
+        assert 'src="%s"' % _staged_src(plugin, rel) in seen
     assert a not in seen and b not in seen
 
 
@@ -347,6 +378,50 @@ def test_failed_downloads_are_reported_and_kept(tmp_path, monkeypatch):
     assert 'failed to download' in plugin.log.warnings[0]
     assert URL in plugin.log.warnings[0]
     assert URL in plugin.fix_resources_seen[0]
+    assert list(base.iterdir()) == []
+
+
+def test_download_avoids_a_staged_local_name(tmp_path, monkeypatch):
+    # A local image staged under the same name must not be overwritten by a
+    # download: the download takes the -2 suffix and each reference keeps
+    # its own file.
+    url = 'https://cdn/x/pic.png'
+    book = tmp_path / 'book'
+    book.mkdir()
+    (book / 'pic.png').write_bytes(JPEG)
+    base = tmp_path / 'in'
+    base.mkdir()
+    _refs(monkeypatch, 'pic.png')
+    _patch_urlopen(monkeypatch, {url: FakeResponse()})
+    plugin = _plugin(book_dir=str(book))
+
+    plugin.fix_resources(
+        '<img src="pic.png"/><img src="%s"/>' % url, str(base))
+
+    assert _staged(plugin) == {'pic.png': JPEG, 'pic-2.png': PNG}
+    seen = plugin.fix_resources_seen[0]
+    assert 'src="%s"' % _staged_src(plugin, 'pic.png') in seen
+    assert 'src="%s"' % _staged_src(plugin, 'pic-2.png') in seen
+
+
+def test_discard_removes_staged_local_and_remote_images(
+        tmp_path, monkeypatch):
+    """Nothing staged may outlive the conversion (convert() calls this)."""
+    _refs(monkeypatch, 'images/1.jpg')
+    _patch_urlopen(monkeypatch, {URL: FakeResponse()})
+    book = tmp_path / 'book'
+    (book / 'images').mkdir(parents=True)
+    (book / 'images' / '1.jpg').write_bytes(JPEG)
+    base = tmp_path / 'in'
+    base.mkdir()
+    plugin = _plugin(book_dir=str(book))
+
+    plugin.fix_resources(
+        '<img src="images/1.jpg"/><img src="%s"/>' % URL, str(base))
+    assert sorted(_staged(plugin)) == ['21_b6cbe1.png', 'images/1.jpg']
+
+    plugin._discard_staged_files()
+
     assert list(base.iterdir()) == []
 
 
